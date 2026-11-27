@@ -573,7 +573,9 @@ function Dashboard({s,go,setM}){
  const groups=[['Veículos',s.vehicles.filter(v=>v.kind!=='equipamento'),0],['Equipamentos',s.vehicles.filter(v=>v.kind==='equipamento'),1]].filter(g=>g[1].length).map(([name,list,eq])=>{
   const pl=new Set(list.map(v=>v.plate)),uso=s.tires.filter(t=>t.status==='uso'&&pl.has(t.plate)),als=al.filter(a=>a.t.plate&&pl.has(a.t.plate)),sv=svcs.filter(x=>pl.has(x.plate)),fu=fuels.filter(x=>pl.has(x.plate)),
    fv=fu.reduce((a,x)=>a+(x.value||0),0),fl=fu.reduce((a,x)=>a+(x.liters||0),0),pos=list.reduce((a,v)=>a+posOf(v).length,0),svv=sv.reduce((a,x)=>a+(x.value||0),0),word=eq?'equipamento':'veículo';
-  return {name,list,eq,cards:[
+  const pts=list.map(v=>({v,r:fuelStats(s,v.plate)})).filter(x=>x.r.n>=2&&x.r.dist>0&&x.r.liters>0).map(({v,r})=>{const u=eq?'h':'km',cons=r.kmL==null?'—':eq?f2(1/r.kmL)+' L/h':f2(r.kmL)+' km/L';
+   return {k:v.plate,label:v.plate,x:r.dist,y:r.liters,cons,gasto:r.value,tipText:N(r.dist)+' '+u+' · '+f1(r.liters)+' L',tip:html`<b>${v.plate}</b> · ${v.model}<br/>${eq?'Trabalhou':'Percorreu'} ${N(r.dist)} ${u}<br/>Abasteceu ${f1(r.liters)} L${r.priceL!=null?' · '+brl(r.value):''}<br/>Consumo ${cons}`}});
+  return {name,list,eq,pts,cards:[
    [eq?'Equipamentos':'Veículos',list.length,uso.length+' de '+pos+' posições com pneu','var(--accent)',null],
    ['Pneus em uso',uso.length,brl(uso.reduce((a,t)=>a+(t.price||0),0))+' em valor de compra','var(--ok)','aplic'],
    ['Alertas de troca',als.length,als.filter(a=>a.lv==='bad').length+' críticos','var(--bad)',null],
@@ -584,6 +586,10 @@ function Dashboard({s,go,setM}){
  <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">${money.map(x=>html`<button key=${x[0]} onClick=${()=>go(x[4])} class="relative overflow-hidden rounded-md border border-line bg-panel p-4 pl-5 text-left hover:border-brand"><i class="absolute inset-y-0 left-0 w-1.5" style=${{background:x[3]}}></i><div class="text-sm text-mute">${x[0]}</div><div class="font-head text-4xl font-semibold leading-none mt-2 tabular-nums">${brl(x[1])}</div><div class="text-sm text-mute mt-2">${x[2]}</div></button>`)}</div>
  ${groups.map(g=>html`<section key=${g.name} class="mt-8 border-t border-line pt-5"><div class="font-head text-2xl font-semibold mb-3">${g.name}</div>
   <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">${g.cards.map(x=>html`<${x[4]?'button':'div'} key=${x[0]} onClick=${x[4]?()=>go(x[4]):undefined} class=${'relative overflow-hidden rounded-md border border-line bg-panel p-4 pl-5 text-left max-lg:last:col-span-2'+(x[4]?' hover:border-brand':'')}><i class="absolute inset-y-0 left-0 w-1.5" style=${{background:x[3]}}></i><div class="text-sm text-mute">${x[0]}</div><div class=${'font-head font-semibold leading-none mt-2 tabular-nums '+(typeof x[1]==='number'&&(x[0].startsWith('Gasto'))?'text-3xl':'text-5xl')}>${x[0].startsWith('Gasto')?brl(x[1]):x[1]}</div><div class="text-sm text-mute mt-2">${x[2]}</div><//>`)}</div>
+  <div class="mt-4 viz">${g.pts.length?html`<${ChartCard} wide=${1} title=${g.eq?'Abastecimento x horas trabalhadas':'Abastecimento x quilometragem percorrida'} sub=${g.eq?'Um pico por equipamento: horas de horímetro entre o 1º e o último abastecimento, e logo abaixo os litros abastecidos, na mesma ordem.':'Um pico por veículo: km entre o 1º e o último abastecimento, e logo abaixo os litros abastecidos, na mesma ordem.'}
+    cols=${[g.eq?'Equipamento':'Veículo',g.eq?'Horas trabalhadas':'Km percorridos','Litros abastecidos','Consumo médio','Gasto']} rows=${g.pts.map(x=>[x.label,N(x.x)+' '+(g.eq?'h':'km'),f1(x.y)+' L',x.cons,brl(x.gasto)])}>
+    <div class="grid gap-5"><div><div class="mb-1 text-sm font-medium">${g.eq?'Horas trabalhadas (h)':'Quilometragem percorrida (km)'}</div><${ColChart} data=${g.pts.map(x=>({k:x.k,label:x.label,short:N(x.x)+(g.eq?' h':' km'),value:x.x,tip:html`<b>${x.label}</b><br/>${g.eq?'Trabalhou ':'Percorreu '}${N(x.x)} ${g.eq?'h':'km'}<br/>Consumo ${x.cons}`}))} fmtAxis=${v=>N(Math.round(v))} label=${g.eq?'Horas trabalhadas por equipamento':'Quilometragem percorrida por veículo'}/></div>
+     <div><div class="mb-1 text-sm font-medium">Litros abastecidos</div><${ColChart} data=${g.pts.map(x=>({k:x.k,label:x.label,short:f1(x.y)+' L',value:x.y,tip:html`<b>${x.label}</b><br/>Abasteceu ${f1(x.y)} L<br/>Gasto ${brl(x.gasto)}`}))} fmtAxis=${v=>N(Math.round(v))} label=${'Litros abastecidos por '+(g.eq?'equipamento':'veículo')}/></div></div><//>`:html`<${Empty}>${g.eq?'Equipamentos':'Veículos'}: o gráfico de abastecimento aparece quando houver pelo menos 2 abastecimentos com ${g.eq?'horímetro':'km'} crescente em algum ${g.eq?'equipamento':'veículo'}, na aba Abastecimentos.<//>`}</div>
   <${VehGrid} s=${{...s,vehicles:g.list}} al=${al} setM=${setM} eqm=${g.eq}/></section>`)}
  <div class="mt-5 rounded-lg border border-line bg-panel p-4"><div class="font-head text-xl font-semibold mb-3">Situação dos ${s.tires.length} pneus</div>
   <div class="flex h-3 rounded overflow-hidden bg-line">${Object.keys(ST).map(k=>html`<div key=${k} title=${ST[k]} style=${{width:c(k)/tot*100+'%',background:STV[k]}}></div>`)}</div>
@@ -1009,6 +1015,82 @@ async function exportDocx(R){
  return {filename:'relatorio-pneus-'+fileStamp()+'.docx',data:blob};
 }
 
+const cmoney=v=>v>=1000?(v/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mil':N(Math.round(v));
+function HBarX({data,fmt,onPick,sel}){
+ const [h,setH]=useState(-1);const max=Math.max(...data.map(d=>d.value),1);
+ return html`<div class="grid gap-1">${data.map((d,i)=>html`<div key=${d.label} tabIndex="0" role=${onPick?'button':undefined} aria-pressed=${onPick?sel===d.label:undefined} title=${d.label+': '+fmt(d.value)} onClick=${()=>onPick&&onPick(d.label)} onKeyDown=${e=>{if(onPick&&(e.key==='Enter'||e.key===' ')){e.preventDefault();onPick(d.label)}}} onMouseEnter=${()=>setH(i)} onMouseLeave=${()=>setH(-1)} onFocus=${()=>setH(i)} onBlur=${()=>setH(-1)} class=${'flex items-center gap-3 rounded px-2 py-1 text-sm '+(onPick?'cursor-pointer ':'')+(h===i||sel===d.label?'bg-bg':'')}>
+  <div class=${'w-24 shrink-0 truncate '+(sel===d.label?'font-semibold text-ink':'text-mute')}>${d.label}</div>
+  <div class="flex flex-1 items-center gap-2"><div style=${{width:Math.max(d.value/max*100,d.value>0?1.5:0)+'%',height:'16px',background:'var(--s1)',borderRadius:'0 4px 4px 0',opacity:(h<0&&!sel)||h===i||sel===d.label?1:.5}}></div><span class="whitespace-nowrap">${fmt(d.value)}</span></div></div>`)}</div>`}
+function StackCol({data,series,onPick,sel,label}){
+ const [h,setH]=useState(-1);
+ const W=640,H=240,pl=56,pr=8,pt=12,pb=26,n=data.length,y0=H-pb,ph=H-pt-pb;
+ const tot=d=>d.v.reduce((a,b)=>a+b,0);
+ const max=niceMax(Math.max(...data.map(tot),0)),band=(W-pl-pr)/n,bw=Math.min(28,band*0.64),step=Math.ceil(n/10),yy=v=>y0-v/max*ph;
+ return html`<div class="relative"><div class="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-mute">${series.map(x=>html`<span key=${x.n} class="inline-flex items-center gap-1.5"><i class="inline-block h-2.5 w-2.5 rounded-sm" style=${{background:x.c}}></i>${x.n}</span>`)}</div>
+ <svg viewBox=${'0 0 '+W+' '+H} class="w-full" role="img" aria-label=${label}>
+  ${[0,.5,1].map(f=>html`<g key=${f}><line x1=${pl} x2=${W-pr} y1=${yy(max*f)} y2=${yy(max*f)} stroke=${f===0?'var(--axis)':'var(--line)'} strokeWidth="1"/><text x=${pl-6} y=${yy(max*f)+4} textAnchor="end" fontSize="11" fill="var(--mute)">${cmoney(max*f)}</text></g>`)}
+  ${data.map((d,i)=>{let acc=0;const x=pl+band*i+(band-bw)/2;
+   return html`<g key=${d.k} opacity=${(h<0&&!sel)||h===i||sel===d.k?1:.5}>
+    ${d.v.map((v,j)=>{const y1=yy(acc+v),y2=yy(acc);acc+=v;const hh=y2-y1;return hh>0.5&&html`<rect key=${j} x=${x} y=${y1} width=${bw} height=${Math.max(hh-2,1)} rx="2" fill=${series[j].c}/>`})}
+    ${sel===d.k&&html`<rect x=${x-3} y=${yy(tot(d))-3} width=${bw+6} height=${y0-yy(tot(d))+3} fill="none" stroke="var(--ink)" strokeWidth="1.5" rx="3"/>`}
+    ${i%step===0&&html`<text x=${x+bw/2} y=${H-8} textAnchor="middle" fontSize="11" fill="var(--mute)">${d.label}</text>`}
+    <rect x=${pl+band*i} y="0" width=${band} height=${H} fill="transparent" tabIndex="0" style=${{cursor:onPick?'pointer':'default'}} onClick=${()=>onPick&&onPick(d.k)} onKeyDown=${e=>{if(onPick&&(e.key==='Enter'||e.key===' ')){e.preventDefault();onPick(d.k)}}} onMouseEnter=${()=>setH(i)} onMouseLeave=${()=>setH(-1)} onFocus=${()=>setH(i)} onBlur=${()=>setH(-1)}/></g>`})}
+ </svg>
+ ${h>=0&&html`<div class="pointer-events-none absolute z-10 rounded-md border border-line bg-panel px-2 py-1 text-xs shadow-lg" style=${{left:((pl+band*h+band/2)/W*100)+'%',top:'14%',transform:'translate(-50%,0)'}}><b>${data[h].label}</b>${series.map((x,j)=>html`<div key=${x.n}>${x.n}: ${brl(data[h].v[j])}</div>`)}<div class="mt-0.5 border-t border-line pt-0.5">Total: ${brl(tot(data[h]))}</div></div>`}</div>`}
+
+function Analise({s}){
+ const [per,setPer]=useState('365');const [de,setDe]=useState('');const [ate,setAte]=useState('');
+ const [tipo,setTipo]=useState('todos');const [un,setUn]=useState('');const [mes,setMes]=useState('');
+ const pool=s.vehicles.filter(v=>tipo==='todos'||(tipo==='equipamento'?v.kind==='equipamento':v.kind!=='equipamento'));
+ const sel=pool.filter(v=>!un||v.plate===un),pl=new Set(sel.map(v=>v.plate));
+ const from=per==='all'?'':per==='custom'?de:new Date(Date.now()-(+per)*864e5).toISOString().slice(0,10),to=per==='custom'?ate:'';
+ const inR=d=>(!from||d>=from)&&(!to||d<=to)&&(!mes||d.slice(0,7)===mes);
+ const svc=(s.services||[]).filter(x=>pl.has(x.plate)&&inR(x.date)),fu=(s.fuel||[]).filter(x=>pl.has(x.plate)&&inR(x.date)),ev=(s.history||[]).filter(x=>pl.has(x.plate)&&inR(x.date)&&x.cost>0);
+ const sum=(a,f)=>a.reduce((t,x)=>t+(Number(f(x))||0),0);
+ const sv=sum(svc,x=>x.value),fv=sum(fu,x=>x.value),evv=sum(ev,x=>x.cost),lit=sum(fu,x=>x.liters),total=sv+fv+evv;
+ const rows=sel.map(v=>{const eq=v.kind==='equipamento',L=fu.filter(x=>x.plate===v.plate).sort((a,b)=>a.date.localeCompare(b.date)||a.km-b.km),r=fuelStatsL(L);
+  const a=sum(svc.filter(x=>x.plate===v.plate),x=>x.value),b=sum(L,x=>x.value),c=sum(ev.filter(x=>x.plate===v.plate),x=>x.cost);
+  return {v,eq,u:eq?'h':'km',r,svc:a,fuel:b,ev:c,total:a+b+c,liters:r.liters,dist:r.dist,kmL:r.kmL,cpk:r.dist>0?(a+b)/r.dist:null}}).filter(x=>x.total>0||x.liters>0).sort((a,b)=>b.total-a.total);
+ const RV=rows.filter(x=>!x.eq),RE=rows.filter(x=>x.eq);
+ const kmT=sum(RV,x=>x.dist),hT=sum(RE,x=>x.dist),kd=sum(RV,x=>x.r.kmLd),kl=sum(RV,x=>x.r.kmLl),hd=sum(RE,x=>x.r.kmLd),hl=sum(RE,x=>x.r.kmLl);
+ const consV=kl>0?kd/kl:null,consE=hd>0?hl/hd:null,cpk=kmT>0?sum(RV,x=>x.svc+x.fuel)/kmT:null,cph=hT>0?sum(RE,x=>x.svc+x.fuel)/hT:null;
+ const ms=new Set();svc.forEach(x=>ms.add(x.date.slice(0,7)));fu.forEach(x=>ms.add(x.date.slice(0,7)));ev.forEach(x=>ms.add(x.date.slice(0,7)));
+ let months=[];if(ms.size){const a=[...ms].sort(),f=a[0],l=a[a.length-1];for(let k=f;k<=l&&months.length<60;k=addM(k,1))months.push(k);months=months.slice(-24)}
+ const sm=k=>sum(svc.filter(x=>x.date.slice(0,7)===k),x=>x.value),fm=k=>sum(fu.filter(x=>x.date.slice(0,7)===k),x=>x.value),em=k=>sum(ev.filter(x=>x.date.slice(0,7)===k),x=>x.cost),lm=k=>sum(fu.filter(x=>x.date.slice(0,7)===k),x=>x.liters);
+ const SER=[{n:'Combustível',c:'var(--s1)'},{n:'Serviços',c:'var(--s2)'},{n:'Pneus (eventos)',c:'var(--s3)'}];
+ const stack=months.map(k=>({k,label:mlabel(k),v:[fm(k),sm(k),em(k)]}));
+ const litM=months.map(k=>({k,label:mlabel(k),short:f1(lm(k))+' L',value:lm(k),tip:html`<b>${mlabel(k)}</b><br/>${f1(lm(k))} L · ${brl(fm(k))}`}));
+ const byUnit=rows.slice(0,12).map(x=>({label:x.v.plate,value:x.total}));
+ const consVd=RV.filter(x=>x.kmL!=null).map(x=>({label:x.v.plate,value:x.kmL})).sort((a,b)=>b.value-a.value),consEd=RE.filter(x=>x.kmL!=null).map(x=>({label:x.v.plate,value:1/x.kmL})).sort((a,b)=>a.value-b.value);
+ const bySvc=grp(svc,x=>SVC[x.type]||x.type,x=>x.value);
+ const tiresUso=s.tires.filter(t=>t.status==='uso'&&pl.has(t.plate)),byBrand=grp(tiresUso,t=>t.brand||'—',()=>1),bySit=grp(s.tires,t=>ST[t.status]||t.status,()=>1);
+ const filtros=[tipo!=='todos'&&['Tipo: '+(tipo==='equipamento'?'Equipamentos':'Veículos'),()=>{setTipo('todos');setUn('')}],un&&['Unidade: '+un,()=>setUn('')],mes&&['Mês: '+mlabel(mes),()=>setMes('')]].filter(Boolean);
+ const nothing=!(s.services||[]).length&&!(s.fuel||[]).length&&!(s.history||[]).some(h=>h.cost>0);
+ const pickUn=l=>setUn(u=>u===l?'':l),pickMes=k=>setMes(m=>m===k?'':k);
+ return html`<div class="viz grid gap-5">
+  <section class="rounded-lg border border-line bg-panel p-4" aria-label="Filtros"><div class="grid gap-3 md:grid-cols-2 lg:grid-cols-5 items-end">
+   <label class="text-sm"><span class="text-mute">Período</span><select class=${IN} value=${per} onChange=${e=>{setPer(e.target.value);setMes('')}}><option value="30">Últimos 30 dias</option><option value="90">Últimos 90 dias</option><option value="365">Últimos 12 meses</option><option value="all">Todo o período</option><option value="custom">Datas personalizadas</option></select></label>
+   ${per==='custom'&&html`<label class="text-sm"><span class="text-mute">De</span><input type="date" class=${IN} value=${de} onChange=${e=>setDe(e.target.value)}/></label><label class="text-sm"><span class="text-mute">Até</span><input type="date" class=${IN} value=${ate} onChange=${e=>setAte(e.target.value)}/></label>`}
+   <label class="text-sm"><span class="text-mute">Tipo</span><select class=${IN} value=${tipo} onChange=${e=>{setTipo(e.target.value);setUn('')}}><option value="todos">Veículos e equipamentos</option><option value="veiculo">Só veículos</option><option value="equipamento">Só equipamentos</option></select></label>
+   <label class="text-sm"><span class="text-mute">Unidade</span><select class=${IN} value=${un} onChange=${e=>setUn(e.target.value)}><option value="">Todas</option>${pool.map(v=>html`<option key=${v.plate} value=${v.plate}>${v.plate} · ${v.model}</option>`)}</select></label></div>
+   <div class="mt-3 flex flex-wrap items-center gap-2 text-sm"><span class="text-mute">Clique nas barras e nas linhas para filtrar tudo.</span>${filtros.map(([t,f])=>html`<button key=${t} onClick=${f} class="rounded-full border border-line bg-bg px-3 py-0.5">${t} ✕</button>`)}${(filtros.length>0||per!=='365')&&html`<button class="underline" onClick=${()=>{setTipo('todos');setUn('');setMes('');setPer('365')}}>Limpar filtros</button>`}</div></section>
+  ${nothing?html`<${Empty}>Ainda não há serviços, abastecimentos ou custos de pneus lançados. Registre dados nas abas Serviços e Abastecimentos para montar as análises.<//>`:html`
+  <div class="grid grid-cols-2 gap-3 lg:grid-cols-4"><${Tile} sm=${1} l="Gasto total" v=${brl(total)} sub="Combustível + serviços + custos de pneus"/><${Tile} sm=${1} l="Combustível" v=${brl(fv)} sub=${f1(lit)+' L abastecidos'}/><${Tile} sm=${1} l="Serviços" v=${brl(sv)} sub=${svc.length+(svc.length===1?' serviço':' serviços')}/><${Tile} sm=${1} l="Custos de pneus" v=${brl(evv)} sub=${ev.length+(ev.length===1?' evento com custo':' eventos com custo')}/>
+   <${Tile} sm=${1} l="Percorrido" v=${[kmT?N(kmT)+' km':'',hT?f1(hT)+' h':''].filter(Boolean).join(' · ')||'—'} sub="Entre o 1º e o último abastecimento"/><${Tile} sm=${1} l="Consumo médio" v=${[consV!=null?f2(consV)+' km/L':'',consE!=null?f2(consE)+' L/h':''].filter(Boolean).join(' · ')||'—'} sub="Tanque cheio"/><${Tile} sm=${1} l="Custo por km / hora" v=${[cpk!=null?brl(cpk)+'/km':'',cph!=null?brl(cph)+'/h':''].filter(Boolean).join(' · ')||'—'} sub="Combustível + serviços"/><${Tile} sm=${1} l="Pneus em uso" v=${String(tiresUso.length)} sub=${brl(sum(tiresUso,t=>t.price))+' em valor de compra'}/></div>
+  <div class="grid gap-5 lg:grid-cols-2">
+   <${ChartCard} title="Gasto por mês" sub="Clique em um mês para filtrar a tela toda." cols=${['Mês','Combustível','Serviços','Pneus (eventos)','Total']} rows=${stack.map(d=>[mlabel(d.k),brl(d.v[0]),brl(d.v[1]),brl(d.v[2]),brl(d.v[0]+d.v[1]+d.v[2])])}>${stack.length?html`<${StackCol} data=${stack} series=${SER} onPick=${pickMes} sel=${mes} label="Gasto por mês, empilhado por combustível, serviços e eventos de pneus"/>`:html`<${Empty}>Sem gastos no período.<//>`}<//>
+   <${ChartCard} title="Gasto por veículo e equipamento" sub="Clique em uma unidade para filtrar. Os 12 maiores." cols=${['Unidade','Gasto total']} rows=${byUnit.map(d=>[d.label,brl(d.value)])}>${byUnit.length?html`<${HBarX} data=${byUnit} fmt=${brl} onPick=${pickUn} sel=${un}/>`:html`<${Empty}>Sem gastos no período.<//>`}<//>
+   <${ChartCard} title="Litros abastecidos por mês" cols=${['Mês','Litros','Gasto']} rows=${litM.map(d=>[mlabel(d.k),f1(d.value)+' L',brl(fm(d.k))])}>${litM.length?html`<${ColChart} data=${litM} fmtAxis=${v=>N(Math.round(v))} label="Litros abastecidos por mês"/>`:html`<${Empty}>Sem abastecimentos no período.<//>`}<//>
+   <${ChartCard} title="Gasto por tipo de serviço" cols=${['Serviço','Valor']} rows=${bySvc.map(d=>[d.label,brl(d.value)])}>${bySvc.length?html`<${HBar} data=${bySvc} fmt=${brl}/>`:html`<${Empty}>Sem serviços no período.<//>`}<//>
+   <${ChartCard} title="Consumo médio dos veículos (km/L)" sub="Maior é melhor." cols=${['Veículo','km/L']} rows=${consVd.map(d=>[d.label,f2(d.value)])}>${consVd.length?html`<${HBarX} data=${consVd} fmt=${v=>f2(v)+' km/L'} onPick=${pickUn} sel=${un}/>`:html`<${Empty}>Precisa de 2 abastecimentos com tanque cheio.<//>`}<//>
+   <${ChartCard} title="Consumo médio dos equipamentos (L/h)" sub="Menor é melhor." cols=${['Equipamento','L/h']} rows=${consEd.map(d=>[d.label,f2(d.value)])}>${consEd.length?html`<${HBarX} data=${consEd} fmt=${v=>f2(v)+' L/h'} onPick=${pickUn} sel=${un}/>`:html`<${Empty}>Precisa de 2 abastecimentos com tanque cheio em equipamentos.<//>`}<//>
+   <${ChartCard} title="Pneus em uso por marca" cols=${['Marca','Pneus']} rows=${byBrand.map(d=>[d.label,d.value])}>${byBrand.length?html`<${HBar} data=${byBrand} fmt=${v=>N(v)+(v===1?' pneu':' pneus')}/>`:html`<${Empty}>Nenhum pneu em uso nas unidades filtradas.<//>`}<//>
+   <${ChartCard} title="Pneus por situação (toda a frota)" cols=${['Situação','Pneus']} rows=${bySit.map(d=>[d.label,d.value])}>${bySit.length?html`<${HBar} data=${bySit} fmt=${v=>N(v)+(v===1?' pneu':' pneus')}/>`:html`<${Empty}>Nenhum pneu cadastrado.<//>`}<//></div>
+  <section class="rounded-lg border border-line bg-panel p-4"><h3 class="font-head text-xl font-semibold">Resumo por veículo e equipamento</h3><p class="text-sm text-mute">Clique em uma linha para filtrar.</p>
+   <div class="mt-3 overflow-x-auto"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Unidade','Combustível','Serviços','Pneus (eventos)','Total','Litros','Percorrido','Consumo','Custo por km/h'].map(c=>html`<th key=${c} class="px-3 py-2 font-medium">${c}</th>`)}</tr></thead><tbody>
+   ${rows.map(x=>html`<tr key=${x.v.plate} tabIndex="0" onClick=${()=>pickUn(x.v.plate)} onKeyDown=${e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pickUn(x.v.plate)}}} class=${'cursor-pointer border-t border-line hover:bg-bg '+(un===x.v.plate?'bg-bg':'')}><td class="px-3 py-2 font-semibold">${x.v.plate}<span class="ml-2 font-normal text-mute">${x.v.model}${x.eq?' · equip.':''}</span></td><td class="px-3 py-2 tabular-nums">${brl(x.fuel)}</td><td class="px-3 py-2 tabular-nums">${brl(x.svc)}</td><td class="px-3 py-2 tabular-nums">${brl(x.ev)}</td><td class="px-3 py-2 tabular-nums font-semibold">${brl(x.total)}</td><td class="px-3 py-2 tabular-nums">${x.liters?f1(x.liters)+' L':'—'}</td><td class="px-3 py-2 tabular-nums">${x.dist>0?(x.eq?f1(x.dist):N(x.dist))+' '+x.u:'—'}</td><td class="px-3 py-2 tabular-nums">${x.kmL==null?'—':x.eq?f2(1/x.kmL)+' L/h':f2(x.kmL)+' km/L'}</td><td class="px-3 py-2 tabular-nums">${x.cpk==null?'—':brl(x.cpk)+'/'+x.u}</td></tr>`)}
+   </tbody></table>${!rows.length&&html`<p class="p-4 text-sm text-mute">Nenhuma unidade com lançamentos nos filtros escolhidos.</p>`}</div></section>`}</div>`}
+
 function Relatorios({s}){
  const [per,setPer]=useState('365');const [from,setFrom]=useState('');const [to,setTo]=useState('');const [pl,setPl]=useState('');const [msg,setMsg]=useState('');const [box,setBox]=useState('');const [dl,setDl]=useState(null);const [busy,setBusy]=useState('');
  useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
@@ -1153,8 +1235,8 @@ function App({init,sync,remote}={}){
  const close=()=>setM(null);
  const exportBk=async()=>{try{await dl.save({filename:'backup-frota-'+today()+'.json',data:new Blob([JSON.stringify({app:'controle-pneus',versao:1,dados:s})],{type:'application/json'})});setBmsg('Backup salvo.')}catch(e){setBmsg(e&&e.code==='declined'?'Download cancelado.':'Não foi possível salvar o backup.')}};
  const pickBk=e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(String(r.result)),d=j&&j.dados?j.dados:j;if(!d||!Array.isArray(d.vehicles)||!Array.isArray(d.tires))throw 0;setBk({d,name:f.name,v:d.vehicles.length,t:d.tires.length});setBmsg('')}catch(x){setBk(null);setBmsg('Arquivo inválido: use um backup gerado por este sistema.')}};r.onerror=()=>setBmsg('Não foi possível ler o arquivo.');r.readAsText(f)};
- const tabs=[['painel','Painel','grid'],['pneus','Pneus','tire'],['frota','Frota','truck'],['aplic','Aplicação','axle'],['hist','Histórico','clock'],['fuel','Abastecimentos','fuel'],['serv','Serviços','wrench'],['rel','Relatórios','chart'],...(sync&&sync.role==='administrador'?[['usr','Usuários','users']]:[])];
- const subs={usr:'Quem acessa o sistema e o que cada perfil pode fazer',painel:'Visão geral da frota',pneus:'Cadastro e situação de cada pneu',frota:'Veículos e equipamentos: posições, km e horímetro',aplic:'Eixos do veículo e substituição de pneus',hist:'Trocas, rodízios e registros anteriores',fuel:'Abastecimentos, km atualizado e média percorrida por veículo',serv:'Alinhamento, balanceamento, rodízio e manutenção por veículo',rel:'Trocas, custos e valores dos pneus em gráficos'};
+ const tabs=[['painel','Painel','grid'],['pneus','Pneus','tire'],['frota','Frota','truck'],['aplic','Aplicação','axle'],['hist','Histórico','clock'],['fuel','Abastecimentos','fuel'],['serv','Serviços','wrench'],['bi','Análises','chart'],['rel','Relatórios','chart'],...(sync&&sync.role==='administrador'?[['usr','Usuários','users']]:[])];
+ const subs={usr:'Quem acessa o sistema e o que cada perfil pode fazer',bi:'Painel de análises com filtros: gastos, abastecimentos, consumo e serviços',painel:'Visão geral da frota',pneus:'Cadastro e situação de cada pneu',frota:'Veículos e equipamentos: posições, km e horímetro',aplic:'Eixos do veículo e substituição de pneus',hist:'Trocas, rodízios e registros anteriores',fuel:'Abastecimentos, km atualizado e média percorrida por veículo',serv:'Alinhamento, balanceamento, rodízio e manutenção por veículo',rel:'Trocas, custos e valores dos pneus em gráficos'};
  const cur=tabs.find(t=>t[0]===tab);
  const al=alertsOf(s).length;
  useEffect(()=>{try{if(desk&&desk.app&&desk.app.dock)desk.app.dock.setBadge(al?String(al):'').catch(()=>{})}catch(e){}},[desk,al]);
@@ -1182,6 +1264,7 @@ function App({init,sync,remote}={}){
     ${tab==='hist'&&html`<${History} s=${s} mut=${mut} setM=${setMg}/>`}
     ${tab==='fuel'&&html`<${Abastecimentos} s=${s} mut=${mut} setM=${setMg}/>`}
     ${tab==='serv'&&html`<${Servicos} s=${s} mut=${mut} setM=${setMg}/>`}
+    ${tab==='bi'&&html`<${Analise} s=${s}/>`}
     ${tab==='rel'&&html`<${Relatorios} s=${s}/>`}
     ${tab==='usr'&&adm&&sync&&html`<${Usuarios} sb=${sync.sb} me=${sync.email}/>`}
     <footer class="mt-10 text-xs text-mute">${sync?'Dados salvos no Supabase e compartilhados com os usuários autorizados.':'Dados salvos neste navegador.'} ${dl&&html`<button class="underline mr-3" onClick=${exportBk}>Exportar backup</button>`}${adm&&html`<label class="underline cursor-pointer mr-3">Importar backup<input type="file" accept=".json,application/json" class="sr-only" onChange=${pickBk}/></label>`}${bmsg&&html`<span class="mr-3" role="status">${bmsg}</span>`}${bk&&html`<span class="mr-3">Substituir todos os dados atuais por ${bk.name} (${bk.v} veículos, ${bk.t} pneus)? <button class="underline text-bad" onClick=${()=>{setS(migrate(JSON.parse(JSON.stringify(bk.d))));setBk(null);setBmsg('Backup importado.')}}>Sim, substituir</button> <button class="underline" onClick=${()=>setBk(null)}>Cancelar</button></span>`}${!adm?'':conf?html`${sync?'Apagar os dados de TODOS os usuários?':'Apagar todos os pneus, veículos e histórico?'} <button class="underline text-bad" onClick=${()=>{setS(fresh());setConf(false)}}>Sim, apagar tudo</button> <button class="underline" onClick=${()=>setConf(false)}>Cancelar</button>`:html`<button class="underline" onClick=${()=>setConf(true)}>Apagar todos os dados</button>`}</footer>
@@ -1201,7 +1284,6 @@ function App({init,sync,remote}={}){
    ${m.k==='past'&&html`<${PastForm} s=${s} mut=${mut} close=${close} tire=${m.tire}/>`}
    ${m.k==='thist'&&html`<${TireHist} s=${s} t=${m.t} setM=${setMg} close=${close}/>`}
   <//>`}</div>`}
-
 const CFG=window.FROTA_CONFIG||{};
 const RECOV=/type=recovery/.test(location.hash+location.search);
 const HERE=location.origin+location.pathname;
