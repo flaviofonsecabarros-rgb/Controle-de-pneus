@@ -1203,6 +1203,8 @@ function App({init,sync,remote}={}){
   <//>`}</div>`}
 
 const CFG=window.FROTA_CONFIG||{};
+const RECOV=/type=recovery/.test(location.hash+location.search);
+const HERE=location.origin+location.pathname;
 const sb=(CFG.url&&CFG.key&&window.supabase&&!/COLE_AQUI/.test(CFG.url+CFG.key))?window.supabase.createClient(CFG.url,CFG.key):null;
 const BX='rounded-md border border-line bg-panel p-6';
 const PERF={administrador:'Administrador',operador:'Operador',consulta:'Consulta'};
@@ -1218,6 +1220,10 @@ function Login(){
   setB(false);
   if(r.error){const m=r.error.message||'';return setE(/invalid login/i.test(m)?'E-mail ou senha incorretos.':/already|registered/i.test(m)?'Este e-mail já tem conta. Use "Entrar".':/not confirmed/i.test(m)?'Confirme o e-mail enviado pelo sistema e tente de novo.':'Não foi possível continuar: '+(m||'erro de conexão'))}
   if(criar&&!(r.data&&r.data.session))setOk('Conta criada. Se o sistema enviou um e-mail de confirmação, abra-o e depois volte para entrar.')};
+ const esqueci=async()=>{if(busy)return;setE('');setOk('');const m=em.trim();if(!m)return setE('Digite o seu e-mail acima e clique de novo em "Esqueci a minha senha".');
+  setB(true);let r;try{r=await sb.auth.resetPasswordForEmail(m,{redirectTo:HERE})}catch(x){r={error:x}}setB(false);
+  if(r.error){const t=r.error.message||'';return setE(/rate limit|security purposes/i.test(t)?'Muitos e-mails enviados. Aguarde alguns minutos e tente de novo.':'Não foi possível enviar: '+(t||'erro de conexão'))}
+  setOk('Se este e-mail tiver conta, você vai receber um link para criar uma nova senha. Verifique também o spam.')};
  return html`<div class="min-h-screen grid place-items-center p-4 font-body"><form onSubmit=${go} class=${BX+' w-full max-w-sm'}>
   <div class="flex items-center gap-3 mb-4"><div class="grid h-10 w-10 place-items-center rounded-md bg-accent" style=${{color:'#16181B'}}><${TireIcon} s=${28}/></div><div class="font-head text-2xl font-semibold leading-none">Controle de pneus</div></div>
   <div class="mb-3 text-sm font-medium">${criar?'Primeiro acesso: criar a minha senha':'Entrar'}</div>
@@ -1226,8 +1232,23 @@ function Login(){
   ${criar&&html`<label class="mt-3 block text-sm font-medium">Repita a senha<input type="password" autocomplete="new-password" class=${IN} value=${pw2} onChange=${e=>setPw2(e.target.value)}/></label>`}
   ${err&&html`<p class="mt-3 text-sm text-bad" role="alert">${err}</p>`}${ok&&html`<p class="mt-3 text-sm" role="status">${ok}</p>`}
   <button type="submit" disabled=${busy} class="mt-4 w-full rounded-md bg-brand px-4 py-2 font-medium text-onbrand disabled:opacity-60">${busy?'Aguarde…':criar?'Criar conta':'Entrar'}</button>
-  <button type="button" class="mt-3 text-sm underline" onClick=${()=>{setModo(criar?'entrar':'criar');setE('');setOk('')}}>${criar?'Já tenho conta: entrar':'Primeiro acesso? Criar conta'}</button>
+  <div class="mt-3 flex flex-wrap justify-between gap-2"><button type="button" class="text-sm underline" onClick=${()=>{setModo(criar?'entrar':'criar');setE('');setOk('')}}>${criar?'Já tenho conta: entrar':'Primeiro acesso? Criar conta'}</button>${!criar&&html`<button type="button" class="text-sm underline" onClick=${esqueci}>Esqueci a minha senha</button>`}</div>
   <p class="mt-3 text-xs text-mute">Só entram pessoas autorizadas por um administrador. Use o e-mail que o administrador cadastrou.</p></form></div>`}
+function NovaSenha({done,sair}){
+ const [pw,setPw]=useState('');const [pw2,setPw2]=useState('');const [err,setE]=useState('');const [busy,setB]=useState(false);
+ const go=async e=>{e.preventDefault();if(busy)return;setE('');
+  if(pw.length<8)return setE('A senha precisa ter pelo menos 8 caracteres.');if(pw!==pw2)return setE('As senhas não conferem.');
+  setB(true);let r;try{r=await sb.auth.updateUser({password:pw})}catch(x){r={error:x}}setB(false);
+  if(r.error){const m=r.error.message||'';return setE(/different from the old/i.test(m)?'A nova senha precisa ser diferente da anterior.':/weak|short/i.test(m)?'Senha fraca. Use uma senha mais longa.':'Não foi possível salvar a senha: '+(m||'erro de conexão'))}
+  done()};
+ return html`<div class="min-h-screen grid place-items-center p-4 font-body"><form onSubmit=${go} class=${BX+' w-full max-w-sm'}>
+  <div class="flex items-center gap-3 mb-4"><div class="grid h-10 w-10 place-items-center rounded-md bg-accent" style=${{color:'#16181B'}}><${TireIcon} s=${28}/></div><div class="font-head text-2xl font-semibold leading-none">Controle de pneus</div></div>
+  <div class="mb-1 text-sm font-medium">Definir nova senha</div><p class="mb-2 text-xs text-mute">Crie a senha que você vai usar para entrar daqui em diante.</p>
+  <label class="block text-sm font-medium">Nova senha<input type="password" autocomplete="new-password" class=${IN} value=${pw} onChange=${e=>setPw(e.target.value)}/></label>
+  <label class="mt-3 block text-sm font-medium">Repita a nova senha<input type="password" autocomplete="new-password" class=${IN} value=${pw2} onChange=${e=>setPw2(e.target.value)}/></label>
+  ${err&&html`<p class="mt-3 text-sm text-bad" role="alert">${err}</p>`}
+  <button type="submit" disabled=${busy} class="mt-4 w-full rounded-md bg-brand px-4 py-2 font-medium text-onbrand disabled:opacity-60">${busy?'Aguarde…':'Salvar nova senha'}</button>
+  <button type="button" class="mt-3 text-sm underline" onClick=${sair}>Cancelar e sair</button></form></div>`}
 function Usuarios({sb,me}){
  const [rows,setRows]=useState(null);const [err,setErr]=useState('');const [msg,setMsg]=useState('');const [busy,setBusy]=useState(false);const [cd,setCd]=useState('');
  const [f,setF]=useState({nome:'',email:'',perfil:'operador'});
@@ -1275,10 +1296,10 @@ function AcessosPainel({sync,go}){
     <td class="px-3 py-2 text-mute">${PDESC[u.perfil]||''}</td></tr>`)}
   </tbody></table>${rows&&!list.length&&html`<p class="p-4 text-sm text-mute">Nenhum usuário encontrado.</p>`}${!rows&&html`<p class="p-4 text-sm text-mute">Carregando…</p>`}</div>`}</div>`}
 function Root(){
- const [sess,setSess]=useState(undefined);const [rec,setRec]=useState(null);const [me,setMe]=useState(null);const [err,setErr]=useState('');const [st,setSt]=useState('');const [remote,setRemote]=useState(null);
+ const [sess,setSess]=useState(undefined);const [rec,setRec]=useState(null);const [me,setMe]=useState(null);const [err,setErr]=useState('');const [st,setSt]=useState('');const [remote,setRemote]=useState(null);const [recov,setRecov]=useState(RECOV);
  const ver=React.useRef(0),timer=React.useRef(null),pend=React.useRef(null),busy=React.useRef(false),conf=React.useRef(false),fl=React.useRef(null),mail=React.useRef(''),role=React.useRef('');
  useEffect(()=>{if(!sb)return;let ok=true;sb.auth.getSession().then(({data})=>{if(ok)setSess(data.session||null)},()=>{if(ok)setSess(null)});
-  const r=sb.auth.onAuthStateChange((_e,x)=>{if(ok)setSess(x||null)});return()=>{ok=false;try{r.data.subscription.unsubscribe()}catch(e){}}},[]);
+  const r=sb.auth.onAuthStateChange((ev,x)=>{if(!ok)return;if(ev==='PASSWORD_RECOVERY')setRecov(true);setSess(x||null)});return()=>{ok=false;try{r.data.subscription.unsubscribe()}catch(e){}}},[]);
  const uid=sess&&sess.user?sess.user.id:null;mail.current=sess&&sess.user?(sess.user.email||''):'';
  useEffect(()=>{setRec(null);setMe(null);setErr('');pend.current=null;conf.current=false;role.current='';if(!sb||!uid)return;let ok=true;
   (async()=>{
@@ -1313,6 +1334,7 @@ function Root(){
  if(!sb)return html`<${Msg} t="Falta configurar o Supabase"><p class="text-sm">Abra este arquivo em um editor de texto e troque <b>COLE_AQUI_A_PROJECT_URL</b> e <b>COLE_AQUI_A_CHAVE_PUBLICA</b> no início do arquivo (bloco FROTA_CONFIG). Se já trocou, verifique a conexão com a internet.</p><//>`;
  if(sess===undefined)return html`<${Msg} t="Carregando…"><//>`;
  if(!sess)return html`<${Login}/>`;
+ if(recov)return html`<${NovaSenha} done=${()=>{setRecov(false);try{history.replaceState(null,'',HERE)}catch(e){}}} sair=${()=>{setRecov(false);sair()}}/>`;
  if(err)return html`<${Msg} t="Não foi possível abrir"><p class="text-sm">${err}</p><button class="mt-4 underline text-sm" onClick=${sair}>Sair</button><//>`;
  if(!rec||!me)return html`<${Msg} t="Carregando dados…"><//>`;
  const LBL={salvo:'Salvo no Supabase',pendente:'Alterações pendentes…',salvando:'Salvando…',erro:'Erro ao salvar. Tentando de novo…',conflito:'Conflito: outra pessoa salvou antes',semperm:'Sem permissão para salvar: dados recarregados'};
