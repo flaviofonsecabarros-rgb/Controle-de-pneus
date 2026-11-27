@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Controle de pneus da frota</title>
+<!-- ============================================================
+     CONFIGURAÇÃO DO SUPABASE: troque os dois valores abaixo.
+     Project Settings > API: "Project URL" e a chave pública (anon / publishable).
+     NUNCA use a chave service_role aqui.
+     ============================================================ -->
+<script>window.FROTA_CONFIG={url:'https://uaqtswjooldaghnmewhm.supabase.co',key:'sb_publishable_ZfHZG2u9pN8SEqqFIhHdhw_hIfFe-lm'};</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* Fora do Claude não existe window.claude: este atalho faz os botões de Excel/Word/backup baixarem arquivos normalmente. */
+window.claude={use:async function(n){if(n!=='downloads')return null;return{save:async function(f){var b=f.data instanceof Blob?f.data:new Blob([f.data]);var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download=f.filename||'arquivo';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000)}}}};
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>tailwind.config={theme:{extend:{fontFamily:{head:['"Barlow Condensed"','"Arial Narrow"','sans-serif'],body:['Barlow','system-ui','sans-serif']},colors:{bg:'var(--bg)',panel:'var(--panel)',ink:'var(--ink)',mute:'var(--mute)',line:'var(--line)',brand:'var(--brand)',onbrand:'var(--onbrand)',warn:'var(--warn)',bad:'var(--bad)',ok:'var(--ok)',accent:'var(--accent)',onaccent:'var(--onaccent)'}}}}</script>
+<style>
+:root{--bg:#E6E8EB;--panel:#FFFFFF;--ink:#16181B;--mute:#5B616A;--line:#D3D7DC;--brand:#1B1D20;--onbrand:#FFFFFF;--accent:#F5B800;--onaccent:#16181B;--warn:#B45309;--bad:#C0281C;--ok:#1F7A45;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1113;--panel:#1A1D21;--ink:#ECEEF0;--mute:#9AA1AB;--line:#2D3238;--brand:#2E3338;--onbrand:#F3F4F6;--warn:#F0A02A;--bad:#F0786F;--ok:#5CC48A;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0F1113;--panel:#1A1D21;--ink:#ECEEF0;--mute:#9AA1AB;--line:#2D3238;--brand:#2E3338;--onbrand:#F3F4F6;--warn:#F0A02A;--bad:#F0786F;--ok:#5CC48A;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{background:var(--bg);color:var(--ink);font-family:Barlow,system-ui,sans-serif;margin:0}
+button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tbl thead th{background:var(--bg);font-size:12px;color:var(--mute);border-bottom:1px solid var(--line)}
+.tbl tbody tr:nth-child(even){background:color-mix(in srgb,var(--bg) 45%,transparent)}
+.tbl tbody tr:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.tire{border:3px solid #8A6A00;border-radius:14px;background:linear-gradient(90deg,transparent 0 28%,rgba(60,40,0,.55) 28% 33%,transparent 33% 67%,rgba(60,40,0,.55) 67% 72%,transparent 72%),repeating-linear-gradient(180deg,#F2B705 0 7px,#D49A00 7px 10px);box-shadow:inset 3px 0 0 rgba(255,255,255,.3),inset -3px 0 0 rgba(0,0,0,.25);cursor:pointer}
+.tire-empty{background:repeating-linear-gradient(180deg,transparent 0 7px,var(--line) 7px 9px);border-style:dashed;box-shadow:none}
+.viz{--s1:#257de0;--s2:#f47230;--s3:#00b894;--s4:#f2a600;--axis:#C2C2C2}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .viz{--s1:#338ced;--s2:#e76624;--s3:#00a888;--s4:#d28e05;--axis:#474747}}
+:root[data-theme="dark"] .viz{--s1:#338ced;--s2:#e76624;--s3:#00a888;--s4:#d28e05;--axis:#474747}
+.tire-s{border:2px solid #8A6A00;border-radius:5px;background:repeating-linear-gradient(180deg,#F2B705 0 3px,#D49A00 3px 5px)}
+.tire-s.empty{background:transparent;border:1.5px dashed var(--mute)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<script>
+const {useState,useEffect}=React;
+const html=htm.bind(React.createElement);
+const KEY='frota-pneus-v2';
+const POS=['Dianteiro Esquerdo','Dianteiro Direito','Tração Esquerdo Externo','Tração Esquerdo Interno','Tração Direito Interno','Tração Direito Externo','Estepe'];
+const ST={uso:'Em uso',estoque:'Estoque',recapagem:'Recapagem',sucata:'Sucata'};
+const STC={uso:'border border-ok text-ok',estoque:'border border-line text-ink',recapagem:'border border-warn text-warn',sucata:'border border-bad text-bad'};
+const CONDL={novo:'Novo',recapado:'Recapado',usado:'Usado'};
+const BRANDS=['Advance', 'Aeolus', 'Alliance', 'Amberstone', 'Annaite', 'Apollo', 'Armour', 'Atlas', 'Aufine', 'Austone', 'Bandag', 'Barum', 'BFGoodrich', 'BKT', 'Bridgestone', 'Camso', 'CEAT', 'Chaoyang', 'Cheng Shin (CST)', 'Compasal', 'Continental', 'Cooper', 'Dayton', 'Doublestar', 'Double Coin', 'Dunlop', 'Evergreen', 'Falken', 'Fate', 'Federal', 'Firestone', 'Fulda', 'Galaxy', 'General Tire', 'Giti', 'Gislaved', 'Goodride', 'Goodyear', 'GT Radial', 'Habilead', 'Hankook', 'Hifly', 'JK Tyre', 'Jinyu', 'Kapsen', 'Kelly', 'Kenda', 'Kleber', 'Kumho', 'Lassa', 'Levorin', 'Linglong', 'Marshal', 'Maxxis', 'Michelin', 'Mirage', 'Mitas', 'MRF', 'Nexen', 'Nitto', 'Ovation', 'Petlas', 'Pirelli', 'Prinx', 'Rapid', 'Remix', 'Rinaldi', 'Roadlux', 'Roadstone', 'Roadx', 'Sailun', 'Samson', 'Sava', 'Semperit', 'Starmaxx', 'Sumitomo', 'Superhawk', 'Techking', 'Tianli', 'Titan', 'Toyo', 'Tracmax', 'Transking', 'Trelleborg', 'Triangle', 'Tornel', 'Uniroyal', 'Vipal', 'Vredestein', 'Wanli', 'Westlake', 'Windforce', 'Yokohama', 'Zeetex'];
+const brandsAll=s=>[...new Set([...BRANDS,...s.tires.map(t=>t.brand).filter(Boolean)].map(b=>String(b).toUpperCase()))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+const SIZES=['295/80 R22.5', '275/80 R22.5', '315/80 R22.5', '295/75 R22.5', '275/70 R22.5', '295/60 R22.5', '255/70 R22.5', '385/65 R22.5', '445/65 R22.5', '435/50 R19.5', '305/70 R19.5', '285/70 R19.5', '265/70 R19.5', '245/70 R19.5', '225/70 R19.5', '235/75 R17.5', '215/75 R17.5', '225/75 R17.5', '11 R22.5', '12 R22.5', '11 R24.5', '12 R24.5', '9.5 R17.5', '7.50 R16', '8.25 R16', '9.00 R20', '10.00 R20', '11.00 R20', '12.00 R20', '175/70 R13', '175/65 R14', '185/70 R14', '185/60 R15', '185/65 R15', '195/50 R15', '195/55 R16', '195/60 R15', '195/65 R15', '205/55 R16', '205/60 R16', '205/65 R15', '215/55 R17', '215/65 R16', '225/45 R17', '225/65 R17', '235/60 R18', '235/75 R15', '245/70 R16', '265/65 R17', '265/70 R16', '175/75 R16C', '195/75 R16C', '205/75 R16C', '215/75 R16C', '225/75 R16C', '235/65 R16C', '80/100-18', '90/90-18', '90/90-19', '100/80-17', '110/80-19', '110/90-17', '120/70-17', '130/70-17', '140/70-17', '150/70-17', '14.9-24', '18.4-34', '23.1-26', '17.5 R25', '20.5 R25', '23.5 R25', '26.5 R25'];
+const sizesAll=s=>[...new Set([...SIZES,...s.tires.map(t=>t.size).filter(Boolean)])];
+const STV={uso:'var(--ok)',estoque:'var(--mute)',recapagem:'var(--warn)',sucata:'var(--bad)'};
+const AXT={dir:'Direcional',tr:'Tração',livre:'Livre',est:'Estepe'};
+const sidesOf=a=>a.type==='est'?['']:a.dual?['Esquerdo Externo','Esquerdo Interno','Direito Interno','Direito Externo']:['Esquerdo','Direito'];
+const posOf=v=>((v&&v.axles)||[]).flatMap(a=>sidesOf(a).map(sd=>({key:sd?a.name+' · '+sd:a.name,axle:a,side:sd})));
+const posList=(s,plate)=>posOf(s.vehicles.find(x=>x.plate===plate)).map(p=>[p.key,p.key]);
+const defAxles=()=>[{id:'a1',name:'Eixo 1',type:'dir',dual:false},{id:'a2',name:'Eixo 2',type:'tr',dual:true},{id:'a3',name:'Estepe',type:'est',dual:false}];
+const LEG={'Dianteiro Esquerdo':'Eixo 1 · Esquerdo','Dianteiro Direito':'Eixo 1 · Direito','Tração Esquerdo Externo':'Eixo 2 · Esquerdo Externo','Tração Esquerdo Interno':'Eixo 2 · Esquerdo Interno','Tração Direito Interno':'Eixo 2 · Direito Interno','Tração Direito Externo':'Eixo 2 · Direito Externo','Estepe':'Estepe'};
+const migrate=s=>{(s.vehicles||[]).forEach(v=>{if(!v.kind)v.kind='veiculo'});s.tires.forEach(t=>{if(t.brand)t.brand=String(t.brand).toUpperCase()});if(!s.services)s.services=[];if(!s.fuel)s.fuel=[];if(!s.fuelPrices)s.fuelPrices={};s.tires.sort(byId);s.vehicles.sort(byPlate);if(s.vehicles.every(v=>v.axles))return s;s.vehicles.forEach(v=>{if(!v.axles)v.axles=defAxles()});const m=x=>x&&x.split(' ⇄ ').map(p=>p.split(' → ').map(q=>LEG[q]||q).join(' → ')).join(' ⇄ ');s.tires.forEach(t=>{if(t.pos)t.pos=LEG[t.pos]||t.pos});s.history.forEach(h=>{h.pos=m(h.pos)});return s};
+const fresh=()=>migrate(JSON.parse(JSON.stringify(seed)));
+const brl=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const N=n=>Number(n||0).toLocaleString('pt-BR');
+const today=()=>new Date().toISOString().slice(0,10);
+const fmtD=d=>d.split('-').reverse().join('/');
+const dotYear=d=>{const m=/(\d{2})(\d{2})$/.exec((d||'').trim());return m?2000+ +m[2]:null};
+const T=(id,brand,model,size,dot,tread,status,price,plate,pos,kmIn)=>({id,brand,model,size,dot,tread,status,price,plate:plate||null,pos:pos||null,kmIn:kmIn||null,kmRodado:0});
+const seed={vehicles:[],tires:[],history:[],services:[],fuel:[],fuelPrices:{}};
+const load=()=>{try{const r=localStorage.getItem(KEY);if(r)return migrate(JSON.parse(r))}catch(e){}return fresh()};
+const alertsOf=s=>{const a=[],yr=new Date().getFullYear();
+ s.tires.forEach(t=>{
+  if(t.status==='uso'&&t.tread!=null){
+   if(t.tread<=1.6)a.push({t,lv:'bad',m:'Sulco de '+t.tread+' mm, abaixo do limite legal de 1,6 mm'});
+   else if(t.tread<=3)a.push({t,lv:'warn',m:'Sulco de '+t.tread+' mm, troca próxima'});}
+  if(t.status==='uso'&&t.kmVida>0){const u=kmTire(s,t);
+   if(u>=t.kmVida)a.push({t,lv:'bad',m:'Passou da vida prevista: rodou '+N(u)+' de '+N(t.kmVida)+' km'});
+   else if(u>=t.kmVida*0.9)a.push({t,lv:'warn',m:'Faltam '+N(t.kmVida-u)+' km para a vida prevista ('+N(u)+' de '+N(t.kmVida)+' km)'});}
+  if(t.status==='uso'||t.status==='estoque'){const y=dotYear(t.dot);if(y&&yr-y>=5)a.push({t,lv:'warn',m:'DOT '+t.dot+': pneu com '+(yr-y)+' anos de fabricação'});}
+ });
+ return a.sort((x,y)=>(x.lv==='bad'?0:1)-(y.lv==='bad'?0:1))};
+const IN='mt-1 w-full rounded-md border border-line bg-bg px-3 py-2 text-ink focus:outline-none focus:ring-2 focus:ring-accent';
+const Fld=({l,children})=>html`<label class="block text-sm"><span class="text-mute">${l}</span>${children}</label>`;
+const Sel=({v,on,opts,dis})=>html`<select class=${IN} value=${v} onChange=${on} disabled=${dis}>${opts.map(o=>html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select>`;
+const UP=e=>{const el=e.target;if(el&&typeof el.value==='string'){const a=el.selectionStart,b=el.selectionEnd,u=el.value.toUpperCase();if(u!==el.value){el.value=u;try{el.setSelectionRange(a,b)}catch(x){}}}};
+const Inp=({v,on,type,step,ph})=>{const tx=!type||type==='text';return html`<input class=${IN+(tx?' uppercase':'')} type=${type||'text'} step=${step} placeholder=${ph} value=${v} onChange=${e=>{if(tx)UP(e);on(e)}}/>`};
+const Btn=({on,p,children,sm})=>html`<button onClick=${on} class=${(p?'bg-accent text-onaccent ':'border border-line text-ink ')+'rounded-md font-medium '+(sm?'px-3 py-1 text-sm':'px-4 py-2')}>${children}</button>`;
+const Modal=({title,close,children,wide})=>html`<div class="fixed inset-0 z-20 flex items-end sm:items-center justify-center p-3" style=${{background:'rgba(0,0,0,.5)'}} onClick=${close}><div class=${'w-full max-h-full overflow-auto rounded-xl bg-panel border border-line p-5 '+(wide?'max-w-3xl':'max-w-lg')} onClick=${e=>e.stopPropagation()}><div class="flex items-center justify-between mb-4"><h3 class="font-head text-2xl font-semibold">${title}</h3><button class="text-mute px-2" onClick=${close} aria-label="Fechar">✕</button></div>${children}</div></div>`;
+const Tread=({mm})=>{if(mm==null||mm==='')return html`<span class="text-sm text-mute">Sem medição</span>`;mm=Number(mm);const c=mm<=1.6?'var(--bad)':mm<=3?'var(--warn)':'var(--ok)';return html`<div class="flex items-center gap-2"><div class="h-2 w-20 rounded-sm bg-line overflow-hidden"><div style=${{width:Math.min(100,mm/12*100)+'%',background:c,height:'100%'}}></div></div><span class="tabular-nums text-sm">${mm.toFixed(1)} mm</span></div>`};
+const Badge=({st})=>html`<span class=${'rounded px-2 py-0.5 text-xs font-medium '+STC[st]}>${ST[st]}</span>`;
+function useF(init){const [f,setF]=useState(init);return [f,k=>e=>setF(p=>({...p,[k]:e.target.value})),setF]}
+const Foot=({err,close,ok,label})=>html`${err&&html`<p class="mt-3 text-sm text-bad" role="alert">${err}</p>`}<div class="mt-5 flex justify-end gap-2"><${Btn} on=${close}>Cancelar<//><${Btn} p=${1} on=${ok}>${label}<//></div>`;
+const kmTire=(s,t)=>(t.kmRodado||0)+(t.status==='uso'?Math.max(0,vkm(s,t.plate)-(t.kmIn||0)):0);
+const vkm=(s,p)=>(s.vehicles.find(v=>v.plate===p)||{km:0}).km;
+const mt=(s,plate)=>{const v=s.vehicles.find(x=>x.plate===plate);return v&&v.kind==='equipamento'?{eq:1,u:'h',L:'Horímetro (h)',n:'Horímetro'}:{eq:0,u:'km',L:'Km',n:'Km'}};
+const mv=(s,plate,x)=>N(x)+' '+mt(s,plate).u;
+const tireOf=(n,id)=>n.tires.find(t=>t.id===id);
+const byId=(a,b)=>String(a.id).localeCompare(String(b.id),'pt-BR',{numeric:true,sensitivity:'base'});
+const byPlate=(a,b)=>String(a.plate).localeCompare(String(b.plate),'pt-BR',{numeric:true,sensitivity:'base'});
+const log=(n,e)=>{const tt=n.tires.find(x=>x.id===e.tireId);n.history.unshift({id:Date.now()+Math.random(),unit:tt?tt.price:null,...e})};
+const unitOf=(s,h)=>h.unit!=null?h.unit:((s.tires.find(x=>x.id===h.tireId)||{}).price??null);
+const brlU=v=>v==null?'—':brl(v);
+const bump=(n,plate,km)=>{const v=n.vehicles.find(v=>v.plate===plate);if(v&&km>v.km)v.km=km};
+const doInstall=(n,t,plate,pos,km)=>{t.status='uso';t.plate=plate;t.pos=pos;t.kmIn=km;bump(n,plate,km)};
+const doRemove=(n,t,km,dest)=>{t.kmRodado=(t.kmRodado||0)+Math.max(0,km-(t.kmIn||km));t.status=dest;t.plate=null;t.pos=null;t.kmIn=null;t.kmOut=km};
+const inUse=s=>s.tires.filter(t=>t.status==='uso');
+const tireOpts=(list,s)=>list.map(t=>[t.id,t.id+' · '+t.brand+' '+t.model+(t.cond?' ['+CONDL[t.cond]+']':'')+' · '+t.size+' · '+(t.tread==null?'sem sulco':Number(t.tread).toFixed(1)+' mm')+(t.plate?' ('+t.plate+', '+t.pos+')':'')]);
+
+function TireForm({init,s,mut,close}){
+ const edit=!!init;
+ const [f,u]=useF(init?{...init,tread:init.tread==null?'':String(init.tread),price:String(init.price),kmVida:init.kmVida==null?'':String(init.kmVida),recaps:String(init.recaps||0)}:{id:'',brand:'',model:'',size:'',dot:'',tread:'',status:'estoque',cond:'novo',kmVida:'',price:'',recaps:'0'});
+ const [err,setE]=useState('');
+ const dup=f.id.trim()!==''&&s.tires.some(x=>x.id.toLowerCase()===f.id.trim().toLowerCase()&&(!edit||x.id!==init.id));
+ const sub=()=>{
+  if(!f.id.trim()||!f.brand.trim()||!f.model.trim()||!f.size.trim())return setE('Preencha número de fogo, marca, modelo e medida.');
+  if(dup)return setE('Já existe um pneu com o número de fogo '+f.id.trim()+'. Use outro número.');
+  if(!/^\d{4}$/.test(f.dot.trim()))return setE('O DOT precisa ter 4 dígitos (semana e ano, ex.: 1224).');
+  if(f.kmVida!==''&&+f.kmVida<=0)return setE('A vida útil prevista em km precisa ser maior que zero (ou deixe em branco).');
+  if(f.recaps===''||!(+f.recaps>=0)||!Number.isInteger(+f.recaps))return setE('Recapagens já feitas precisa ser um número inteiro (use 0 se nenhuma).');
+  if((f.tread!==''&&+f.tread<0)||f.price===''||+f.price<0)return setE('Informe um sulco válido (ou deixe em branco) e o valor de compra.');
+  mut(n=>{const bn=f.brand.trim().toUpperCase();
+  const sk=x=>x.toLowerCase().replace(/\s+/g,'');const sn=sizesAll(s).find(z=>sk(z)===sk(f.size.trim()))||f.size.trim();
+  const d={...f,brand:bn,size:sn,id:f.id.trim(),dot:f.dot.trim(),tread:f.tread===''?null:+f.tread,kmVida:f.kmVida===''?null:+f.kmVida,price:+f.price,recaps:+f.recaps};
+   if(n.tires.some(x=>x.id.toLowerCase()===d.id.toLowerCase()&&(!edit||x.id!==init.id)))return;
+   if(edit){const i=n.tires.findIndex(t=>t.id===init.id);if(init.id!==d.id)n.history.forEach(h=>{if(h.tireId===init.id)h.tireId=d.id;if(h.tireOut===init.id)h.tireOut=d.id});n.tires[i]={...n.tires[i],...d}}
+   else n.tires.push({...d,plate:null,pos:null,kmIn:null,kmRodado:0});
+   n.tires.sort(byId)});
+  close()};
+ return html`<div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+  <${Fld} l="Número de fogo"><${Inp} v=${f.id} on=${u('id')} ph="F-0110"/>${dup&&html`<span class="mt-1 block text-xs text-bad" role="alert">Esse número já está cadastrado.</span>`}<//>
+  <${Fld} l="Marca"><input class=${IN+' uppercase'} list="dl-brands" value=${f.brand} onChange=${e=>{UP(e);u('brand')(e)}} placeholder="Digite ou escolha" autoComplete="off"/><datalist id="dl-brands">${brandsAll(s).map(b=>html`<option key=${b} value=${b}/>`)}</datalist><//>
+  <${Fld} l="Modelo"><${Inp} v=${f.model} on=${u('model')}/><//>
+  <${Fld} l="Medida"><input class=${IN+' uppercase'} list="dl-sizes" value=${f.size} onChange=${e=>{UP(e);u('size')(e)}} placeholder="Digite ou escolha" autoComplete="off"/><datalist id="dl-sizes">${sizesAll(s).map(z=>html`<option key=${z} value=${z}/>`)}</datalist><//>
+  <${Fld} l="DOT (semana + ano)"><${Inp} v=${f.dot} on=${u('dot')} ph="1224"/><//>
+  <${Fld} l="Sulco atual (mm, opcional)"><${Inp} type="number" step="0.1" v=${f.tread} on=${u('tread')}/><//>
+  <${Fld} l="Status"><${Sel} v=${f.status} on=${u('status')} dis=${f.status==='uso'} opts=${f.status==='uso'?[['uso','Em uso']]:[['estoque','Estoque'],['recapagem','Recapagem'],['sucata','Sucata']]}/><//>
+  <${Fld} l="Tipo do pneu"><${Sel} v=${f.cond||'novo'} on=${u('cond')} opts=${Object.keys(CONDL).map(k=>[k,CONDL[k]])}/><//>
+  <${Fld} l="Vida útil prevista (km, opcional)"><${Inp} type="number" step="1000" v=${f.kmVida} on=${u('kmVida')} ph="120000"/><//>
+  <${Fld} l="Recapagens já feitas"><${Inp} type="number" step="1" v=${f.recaps} on=${u('recaps')} ph="0"/><//>
+  <${Fld} l="Valor de compra (R$)"><${Inp} type="number" step="0.01" v=${f.price} on=${u('price')}/><//>
+ </div>${f.status==='uso'&&html`<p class="mt-2 text-xs text-mute">Para mudar o status, retire o pneu do veículo na aba Frota.</p>`}
+ <${Foot} err=${err} close=${close} ok=${sub} label=${edit?'Salvar pneu':'Cadastrar pneu'}/>`}
+
+
+const tireCheck=(recs,s)=>{
+ const num=v=>{const t=String(v).trim();return +(t.includes(',')?t.replace(/\./g,'').replace(',','.'):t)};
+ const seen=new Set(s.tires.map(t=>t.id.toLowerCase()));
+ const SMAP={estoque:'estoque','em estoque':'estoque',recapagem:'recapagem','em recapagem':'recapagem',sucata:'sucata',descarte:'sucata',descartado:'sucata'};
+ return recs.map((q,i)=>{
+  const er=[];const r={...q,id:q.id.toUpperCase(),brand:q.brand.toUpperCase(),model:q.model.toUpperCase(),size:q.size.toUpperCase(),status:q.status.toLowerCase(),cond:q.cond.toLowerCase(),dot:/^\d{1,3}$/.test(q.dot)?q.dot.padStart(4,'0'):q.dot};
+  if(!r.id||!r.brand||!r.model||!r.size)er.push('faltam fogo, marca, modelo ou medida');
+  if(r.id){const k=r.id.toLowerCase();if(seen.has(k))er.push('número de fogo já cadastrado ou repetido');else seen.add(k)}
+  if(!/^\d{4}$/.test(r.dot))er.push('DOT precisa ter 4 dígitos');
+  if(r.tread!==''&&!(num(r.tread)>=0))er.push('sulco inválido');
+  if(r.kmVida!==''&&!(num(r.kmVida)>0))er.push('vida útil em km inválida');
+  if(r.recaps!==''&&!(Number.isInteger(num(r.recaps))&&num(r.recaps)>=0))er.push('recapagens já feitas inválido (número inteiro)');
+  if(r.price===''||!(num(r.price)>=0))er.push('valor de compra ausente ou inválido');
+  const st=r.status===''?'estoque':SMAP[r.status];if(!st)er.push(r.status==='uso'||r.status==='em uso'?'status "em uso" não é permitido (instale o pneu pelo sistema)':'status inválido (use estoque, recapagem ou sucata)');
+  const cd=r.cond===''?'novo':(CONDL[r.cond]?r.cond:'');if(!cd)er.push('tipo inválido (use novo, recapado ou usado)');
+  return{n:q.row||i+1,id:r.id,errs:er,d:er.length?null:{id:r.id,brand:r.brand,model:r.model,size:r.size,dot:r.dot,tread:r.tread===''?null:num(r.tread),status:st,cond:cd,kmVida:r.kmVida===''?null:num(r.kmVida),price:num(r.price),recaps:r.recaps===''?0:num(r.recaps)}}})};
+async function parseTiresXlsx(buf,s){
+ await loadLib(LIB_XLSX,'ExcelJS');
+ const wb=new ExcelJS.Workbook();
+ try{await wb.xlsx.load(buf)}catch(e){return{fatal:'Não foi possível ler o arquivo. Envie uma planilha Excel (.xlsx).'}}
+ const ws=wb.getWorksheet('Pneus')||wb.worksheets[0];
+ if(!ws)return{fatal:'A planilha está vazia.'};
+ const col={};ws.getRow(1).eachCell((c,i)=>{if(!col[xNorm(xCell(c.value))])col[xNorm(xCell(c.value))]=i});
+ const pick=(...names)=>{for(const n of names)if(col[n])return col[n];return 0};
+ const C={id:pick('fogo','numerodefogo','ndefogo','nfogo','id','numero'),brand:pick('marca'),model:pick('modelo'),size:pick('medida'),dot:pick('dot'),tread:pick('sulcomm','sulco'),status:pick('status'),cond:pick('tipo'),kmVida:pick('vidautilkm','vidautil','kmvida'),recaps:pick('recapagens','recapagensjafeitas'),price:pick('valordecomprar','valordecompra','valor','preco')};
+ const miss=[['fogo',C.id,'Fogo'],['marca',C.brand,'Marca'],['modelo',C.model,'Modelo'],['medida',C.size,'Medida'],['dot',C.dot,'DOT'],['valor',C.price,'Valor de compra']].filter(x=>!x[1]).map(x=>x[2]);
+ if(miss.length)return{fatal:'Não encontrei as colunas obrigatórias na primeira linha: '+miss.join(', ')+'. Use o modelo (.xlsx) ou o arquivo exportado desta aba.'};
+ const g=(row,c)=>c?xCell(row.getCell(c).value):'';
+ const recs=[];
+ for(let r=2;r<=ws.rowCount;r++){const row=ws.getRow(r);
+  const rec={id:g(row,C.id),brand:g(row,C.brand),model:g(row,C.model),size:g(row,C.size),dot:g(row,C.dot),tread:g(row,C.tread),status:g(row,C.status),cond:g(row,C.cond),kmVida:g(row,C.kmVida),recaps:g(row,C.recaps),price:g(row,C.price),row:r};
+  if(!rec.id&&!rec.brand&&!rec.model&&!rec.size&&!rec.dot&&!rec.price)continue;
+  recs.push(rec)}
+ if(!recs.length)return{fatal:'Nenhum pneu encontrado na planilha (a partir da linha 2).'};
+ return{items:tireCheck(recs,s)};
+}
+async function tireTemplate(){
+ await loadLib(LIB_XLSX,'ExcelJS');
+ const wb=new ExcelJS.Workbook();wb.creator='Controle de pneus';
+ const HEAD={font:{bold:true,color:{argb:'FFFFFFFF'}},fill:{type:'pattern',pattern:'solid',fgColor:{argb:'FF1B1D20'}}};
+ const ws=wb.addWorksheet('Pneus',{views:[{state:'frozen',ySplit:1}]});
+ ws.columns=[['Fogo',12],['Marca',16],['Modelo',18],['Medida',16],['DOT',8,'@'],['Valor de compra (R$)',20,'"R$" #,##0.00'],['Sulco (mm)',12,'0.0'],['Status',13],['Tipo',11],['Vida útil (km)',15,'#,##0'],['Recapagens',13,'0']].map(c=>({header:c[0],width:c[1],style:c[2]?{numFmt:c[2]}:{}}));
+ ws.getRow(1).eachCell(c=>Object.assign(c,HEAD));
+ ws.addRow(['F-0200','MICHELIN','X MULTI Z','295/80 R22.5','2524',2890,16,'Estoque','Novo',120000,0]);
+ const wi=wb.addWorksheet('Instruções');wi.columns=[{width:110}];
+ ['Preencha uma linha por pneu na aba Pneus e apague a linha de exemplo.','Obrigatórios: Fogo, Marca, Modelo, Medida, DOT (4 dígitos, semana e ano) e Valor de compra.','Opcionais: Sulco (mm), Status (Estoque, Recapagem ou Sucata; padrão Estoque), Tipo (Novo, Recapado ou Usado; padrão Novo), Vida útil (km) e Recapagens já feitas (padrão 0).','Pneus "em uso" não podem ser importados: instale-os pelo sistema. Números de fogo repetidos não entram.'].forEach(t=>wi.addRow([t]));
+ const buf=await wb.xlsx.writeBuffer();
+ return{filename:'modelo-pneus.xlsx',data:new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})};
+}
+function ImportXml({s,mut,close}){
+ const [res,setRes]=useState(null);const [done,setDone]=useState(0);const [msg,setMsg]=useState('');const [busy,setBusy]=useState(false);const [dl,setDl]=useState(null);const [name,setName]=useState('');
+ useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
+ const pick=async e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;setDone(0);setMsg('');setRes(null);setName(f.name);setBusy(true);
+  try{setRes(await parseTiresXlsx(await f.arrayBuffer(),s))}catch(x){setMsg('Não foi possível ler o arquivo. Confira se é uma planilha Excel (.xlsx).')}setBusy(false)};
+ const model=async()=>{try{await dl.save(await tireTemplate());setMsg('Modelo salvo.')}catch(e){setMsg(e&&e.code==='declined'?'Download cancelado.':'Não foi possível gerar o modelo agora.')}};
+ const ok=res&&res.items?res.items.filter(i=>i.d):[];const bad=res&&res.items?res.items.filter(i=>!i.d):[];
+ const go=()=>{const list=ok.map(i=>i.d);mut(n=>{const sk=x=>x.toLowerCase().replace(/\s+/g,'');list.forEach(d=>{if(n.tires.some(x=>x.id.toLowerCase()===d.id.toLowerCase()))return;const bn=brandsAll(n).find(b=>b.toLowerCase()===d.brand.toLowerCase())||d.brand;const sn=sizesAll(n).find(z=>sk(z)===sk(d.size))||d.size;n.tires.push({...d,brand:bn,size:sn,plate:null,pos:null,kmIn:null,kmRodado:0})});n.tires.sort(byId)});setDone(list.length);setRes(null);setName('')};
+ return html`<div class="text-sm">
+  <p class="text-mute">Envie uma planilha Excel <b>.xlsx</b> com uma linha por pneu. Colunas: <b>Fogo, Marca, Modelo, Medida, DOT, Valor de compra</b> (obrigatórias) e Sulco (mm), Status (Estoque, Recapagem ou Sucata), Tipo (Novo, Recapado ou Usado), Vida útil (km) e Recapagens (opcionais). O arquivo exportado desta aba pode ser importado de volta, mas pneus em uso são recusados.</p>
+  <div class="mt-3 flex flex-wrap gap-2 items-center"><label class="cursor-pointer rounded-md bg-accent px-4 py-2 font-medium text-onaccent">${busy?'Lendo…':'Escolher planilha (.xlsx)'}<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="sr-only" onChange=${pick}/></label>${dl&&html`<${Btn} on=${model}>Baixar modelo (.xlsx)<//>`}${name&&html`<span class="text-mute">${name}</span>`}</div>
+  ${msg&&html`<p class="mt-2 text-mute" role="status">${msg}</p>`}
+  ${done>0&&html`<p class="mt-3 font-medium text-ok" role="status">${done} ${done===1?'pneu importado':'pneus importados'} com sucesso.</p>`}
+  ${res&&res.fatal&&html`<p class="mt-3 text-bad" role="alert">${res.fatal}</p>`}
+  ${res&&res.items&&html`<div class="mt-3 rounded-md border border-line p-3"><p><b>${ok.length}</b> ${ok.length===1?'pneu pronto':'pneus prontos'} para importar${bad.length?html` · <b class="text-bad">${bad.length}</b> com problema (não serão importados)`:''}.</p>
+   ${bad.length>0&&html`<ul class="mt-2 max-h-40 overflow-auto space-y-1 text-xs text-bad">${bad.slice(0,100).map(i=>html`<li key=${i.n}>Linha ${i.n}${i.id?' ('+i.id+')':''}: ${i.errs.join('; ')}</li>`)}</ul>`}</div>`}
+  <div class="mt-5 flex justify-end gap-2"><${Btn} on=${close}>${done?'Fechar':'Cancelar'}<//>${ok.length>0&&html`<${Btn} p=${1} on=${go}>Importar ${ok.length} ${ok.length===1?'pneu':'pneus'}<//>`}</div></div>`}
+
+const SVC={alinhamento:'Alinhamento',balanceamento:'Balanceamento',rodizio:'Rodízio',manutencao:'Manutenção de pneus'};
+const svcSorted=a=>[...a].sort((x,y)=>y.date.localeCompare(x.date)||y.id-x.id);
+function ServicoForm({s,mut,close,init,plate}){
+ const edit=!!init;
+ const v0=s.vehicles.find(v=>v.plate===(init?init.plate:plate))||s.vehicles[0];
+ const [f,u,setF]=useF(init?{...init,km:init.km==null?'':String(init.km),value:String(init.value),tireId:init.tireId||''}:{plate:v0?v0.plate:'',type:'alinhamento',date:today(),value:'',km:v0?String(v0.km):'',tireId:'',note:''});
+ const [err,setE]=useState('');
+ const onTires=s.tires.filter(t=>t.status==='uso'&&t.plate===f.plate);
+ const chPlate=e=>{const pl=e.target.value,v=s.vehicles.find(x=>x.plate===pl);setF(p=>({...p,plate:pl,tireId:'',km:edit?p.km:(v?String(v.km):p.km)}))};
+ const sub=()=>{
+  if(!f.plate)return setE('Escolha o veículo.');
+  if(!f.date)return setE('Informe a data do serviço.');
+  if(f.value===''||!(+f.value>=0))return setE('Informe o valor do serviço (use 0 se não houve custo).');
+  if(f.km!==''&&!(+f.km>=0))return setE(mt(s,f.plate).eq?'Horímetro inválido.':'Quilometragem inválida.');
+  const d={plate:f.plate,type:f.type,date:f.date,value:+f.value,km:f.km===''?null:+f.km,tireId:f.tireId||'',note:f.note.trim()};
+  mut(n=>{if(edit){const i=n.services.findIndex(x=>x.id===init.id);if(i>=0)n.services[i]={...n.services[i],...d}}else n.services.push({...d,id:Math.max(0,...n.services.map(x=>x.id||0))+1})});
+  close()};
+ if(!s.vehicles.length)return html`<p class="text-sm">Cadastre um veículo na aba Frota antes de registrar serviços.</p>`;
+ return html`<div class="grid grid-cols-2 gap-3">
+  <${Fld} l="Veículo"><${Sel} v=${f.plate} on=${chPlate} opts=${s.vehicles.map(v=>[v.plate,v.plate+' · '+v.model])}/><//>
+  <${Fld} l="Serviço"><${Sel} v=${f.type} on=${u('type')} opts=${Object.keys(SVC).map(k=>[k,SVC[k]])}/><//>
+  <${Fld} l="Data"><${Inp} type="date" v=${f.date} on=${u('date')}/><//>
+  <${Fld} l="Valor (R$)"><${Inp} type="number" step="0.01" v=${f.value} on=${u('value')} ph="0,00"/><//>
+  <${Fld} l=${mt(s,f.plate).eq?"Horímetro do equipamento (opcional)":"Km do veículo (opcional)"}><${Inp} type="number" step="1" v=${f.km} on=${u('km')}/><//>
+  <${Fld} l="Pneu (opcional)"><${Sel} v=${f.tireId} on=${u('tireId')} opts=${[['','Todos / não especificado'],...onTires.map(t=>[t.id,t.id+' · '+t.pos]),...(f.tireId&&!onTires.some(t=>t.id===f.tireId)?[[f.tireId,f.tireId]]:[])]}/><//>
+  <div class="col-span-2"><${Fld} l="Observação (opcional)"><${Inp} v=${f.note} on=${u('note')} ph="Oficina, detalhes do serviço..."/><//></div>
+ </div><p class="mt-2 text-xs text-mute">O serviço fica registrado no veículo e não altera os pneus instalados nem a quilometragem/horímetro.</p>
+ <${Foot} err=${err} close=${close} ok=${sub} label=${edit?'Salvar serviço':'Registrar serviço'}/>`}
+
+function Servicos({s,mut,setM}){
+ const [pl,setPl]=useState('');const [tp,setTp]=useState('');const [q,setQ]=useState('');const [del,setDel]=useState('');
+ const all=s.services||[];
+ const rows=svcSorted(all).filter(x=>(!pl||x.plate===pl)&&(!tp||x.type===tp)&&((x.note||'')+(x.tireId||'')+x.plate).toLowerCase().includes(q.toLowerCase()));
+ const tot=rows.reduce((a,x)=>a+(x.value||0),0);
+ const by=Object.keys(SVC).map(k=>({k,n:rows.filter(x=>x.type===k).length,v:rows.filter(x=>x.type===k).reduce((a,x)=>a+x.value,0)}));
+ return html`<div class="flex flex-wrap gap-2 items-end mb-4">
+  <div class="w-44"><${Sel} v=${pl} on=${e=>setPl(e.target.value)} opts=${[['','Todos os veículos'],...s.vehicles.map(v=>[v.plate,v.plate])]}/></div>
+  <div class="w-52"><${Sel} v=${tp} on=${e=>setTp(e.target.value)} opts=${[['','Todos os serviços'],...Object.keys(SVC).map(k=>[k,SVC[k]])]}/></div>
+  <div class="grow sm:grow-0 sm:w-60"><${Inp} v=${q} on=${e=>setQ(e.target.value)} ph="Buscar observação ou pneu"/></div>
+  <div class="sm:ml-auto"><${Btn} p=${1} on=${()=>setM({k:'svc',plate:pl||undefined})}>Registrar serviço<//></div></div>
+ <div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5"><div class="rounded-lg border border-line bg-panel p-3"><div class="text-sm text-mute">Total gasto</div><div class="font-head text-2xl font-semibold tabular-nums">${brl(tot)}</div><div class="text-xs text-mute">${rows.length} ${rows.length===1?'serviço':'serviços'}</div></div>
+  ${by.map(b=>html`<div key=${b.k} class="rounded-lg border border-line bg-panel p-3"><div class="text-sm text-mute">${SVC[b.k]}</div><div class="font-head text-2xl font-semibold tabular-nums">${brl(b.v)}</div><div class="text-xs text-mute">${b.n} ${b.n===1?'registro':'registros'}</div></div>`)}</div>
+ <div class="overflow-x-auto rounded-lg border border-line bg-panel"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Data','Veículo','Serviço','Pneu','Km / horímetro','Valor','Observação',''].map(c=>html`<th key=${c} class="font-medium px-3 py-2">${c}</th>`)}</tr></thead><tbody>
+  ${rows.map(x=>html`<tr key=${x.id} class="border-t border-line"><td class="px-3 py-2">${fmtD(x.date)}</td><td class="px-3 py-2 font-semibold">${x.plate}</td><td class="px-3 py-2">${SVC[x.type]||x.type}</td><td class="px-3 py-2">${x.tireId||'Todos'}</td><td class="px-3 py-2 tabular-nums">${x.km==null?'—':mv(s,x.plate,x.km)}</td><td class="px-3 py-2 tabular-nums">${brl(x.value)}</td><td class="px-3 py-2 max-w-[260px] truncate" title=${x.note||''}>${x.note||'—'}</td>
+   <td class="px-3 py-2 text-right"><span class="inline-flex gap-2"><${Btn} sm=${1} on=${()=>setM({k:'svc',svc:x})}>Editar<//>${del===x.id?html`<${Btn} sm=${1} on=${()=>{mut(n=>{n.services=n.services.filter(y=>y.id!==x.id)});setDel('')}}>Confirmar exclusão<//>`:html`<${Btn} sm=${1} on=${()=>setDel(x.id)}>Excluir<//>`}</span></td></tr>`)}
+  </tbody></table>${!rows.length&&html`<p class="p-4 text-sm text-mute">${all.length?'Nenhum serviço encontrado com esses filtros.':'Nenhum serviço registrado ainda. Clique em Registrar serviço para lançar alinhamento, balanceamento, rodízio ou manutenção de pneus.'}</p>`}</div>`}
+
+const fuelOf=(s,plate)=>(s.fuel||[]).filter(x=>x.plate===plate).sort((a,b)=>a.date.localeCompare(b.date)||a.km-b.km);
+const fuelStats=(s,plate)=>fuelStatsL(fuelOf(s,plate));
+const fuelStatsL=L=>{const r={n:L.length,liters:0,value:0,priceL:null,kmL:null,perDay:null,perMonth:null,dist:null,last:L.length?L[L.length-1]:null};
+ let lv=0,vv=0;L.forEach(x=>{r.liters+=x.liters;r.value+=x.value||0;if(x.value>0){lv+=x.liters;vv+=x.value}});if(lv>0)r.priceL=vv/lv;
+ if(L.length>=2){const a=L[0],b=L[L.length-1],dist=b.km-a.km,days=(new Date(b.date)-new Date(a.date))/864e5;r.dist=dist;if(dist>0&&days>=1){r.perDay=dist/days;r.perMonth=r.perDay*30}}
+ const F=L.filter(x=>x.full).sort((a,b)=>a.km-b.km);
+ if(F.length>=2){const a=F[0],b=F[F.length-1],lit=L.filter(x=>x.km>a.km&&x.km<=b.km).reduce((q,x)=>q+x.liters,0);if(b.km>a.km&&lit>0){r.kmL=(b.km-a.km)/lit;r.kmLd=b.km-a.km;r.kmLl=lit}}
+ return r};
+const f2=n=>Number(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const f1=n=>Number(n).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
+const fuelNeeds=(x,fp)=>(x.auto||!(x.value>0))&&fp[x.date.slice(0,7)]>0;
+const applyFuelPrices=n=>{const fp=n.fuelPrices||{};let c=0;(n.fuel||[]).forEach(x=>{if(fuelNeeds(x,fp)){const pr=fp[x.date.slice(0,7)];x.price=pr;x.value=Math.round(x.liters*pr*100)/100;x.auto=true;c++}});return c};
+const monthLbl=m=>m.slice(5)+'/'+m.slice(0,4);
+const brl3=n=>'R$ '+Number(n).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3});
+function FuelPrices({s,mut}){
+ const fp=s.fuelPrices||{};const [m,setMon]=useState(today().slice(0,7));const [pr,setPr]=useState('');const [err,setE]=useState('');const [msg,setMsg]=useState('');
+ const keys=Object.keys(fp).sort().reverse();
+ const sub=()=>{setMsg('');
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(m))return setE('Informe o mês no formato AAAA-MM (por exemplo, 2026-11).');
+  if(pr===''||!(+pr>0))return setE('Informe o preço do litro (maior que zero).');
+  setE('');const nfp={...fp,[m]:+pr};const cnt=(s.fuel||[]).filter(x=>fuelNeeds(x,nfp)&&x.date.slice(0,7)===m).length;
+  mut(n=>{n.fuelPrices=n.fuelPrices||{};n.fuelPrices[m]=+pr;applyFuelPrices(n)});
+  setMsg('Preço de '+monthLbl(m)+' salvo: '+brl3(+pr)+' por litro.'+(cnt?' '+cnt+(cnt===1?' abastecimento recalculado':' abastecimentos recalculados')+' pela data de lançamento.':''));setPr('')};
+ return html`<div class="mb-6 rounded-lg border border-line bg-panel p-4">
+  <div class="font-head text-xl font-semibold">Preço do litro por mês</div>
+  <p class="mt-1 text-sm text-mute">Cadastre o preço do litro de cada mês. Os abastecimentos lançados sem preço por litro usam o preço do mês da data do lançamento, e o valor total é calculado sozinho. Ao salvar ou mudar o preço de um mês, os abastecimentos desse mês que usam o preço automático são recalculados.</p>
+  <div class="mt-3 flex flex-wrap items-end gap-3"><div class="w-40"><${Fld} l="Mês (AAAA-MM)"><input class=${IN} type="month" value=${m} onChange=${e=>setMon(e.target.value)} placeholder="AAAA-MM"/><//></div><div class="w-44"><${Fld} l="Preço do litro (R$)"><${Inp} type="number" step="0.001" v=${pr} on=${e=>setPr(e.target.value)} ph="0,000"/><//></div><${Btn} p=${1} on=${sub}>Salvar preço do mês<//></div>
+  ${err&&html`<p class="mt-2 text-sm text-bad" role="alert">${err}</p>`}${msg&&html`<p class="mt-2 text-sm text-ok" role="status">${msg}</p>`}
+  ${keys.length>0&&html`<div class="mt-3 overflow-x-auto"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Mês','Preço do litro','Abastecimentos no mês','Litros no mês','Gasto no mês',''].map(c=>html`<th key=${c} class="font-medium px-3 py-2">${c}</th>`)}</tr></thead><tbody>
+   ${keys.map(k=>{const L=(s.fuel||[]).filter(x=>x.date.slice(0,7)===k);return html`<tr key=${k} class="border-t border-line"><td class="px-3 py-2 font-semibold">${monthLbl(k)}</td><td class="px-3 py-2 tabular-nums">${brl3(fp[k])}</td><td class="px-3 py-2 tabular-nums">${L.length}</td><td class="px-3 py-2 tabular-nums">${L.length?f1(L.reduce((a,x)=>a+x.liters,0))+' L':'—'}</td><td class="px-3 py-2 tabular-nums">${L.length?brl(L.reduce((a,x)=>a+(x.value||0),0)):'—'}</td><td class="px-3 py-2 text-right"><span class="inline-flex gap-2"><${Btn} sm=${1} on=${()=>{setMon(k);setPr(String(fp[k]));setMsg('');setE('')}}>Editar<//><${Btn} sm=${1} on=${()=>mut(n=>{delete n.fuelPrices[k]})}>Excluir<//></span></td></tr>`})}
+  </tbody></table></div>`}</div>`}
+function AbastForm({s,mut,close,init,plate}){
+ const edit=!!init;
+ const v0=s.vehicles.find(v=>v.plate===(init?init.plate:plate))||s.vehicles[0];
+ const [f,u,setF]=useF(init?{...init,km:String(init.km),liters:String(init.liters),price:init.auto?'':(init.price!=null?String(init.price):(init.value>0&&init.liters>0?String(+(init.value/init.liters).toFixed(4)):'')),full:init.full?'1':'0'}:{plate:v0?v0.plate:'',date:today(),km:v0?String(v0.km):'',liters:'',price:'',full:'1',note:''});
+ const [err,setE]=useState('');
+ const chPlate=e=>{const pl=e.target.value,v=s.vehicles.find(x=>x.plate===pl);setF(p=>({...p,plate:pl,km:edit?p.km:(v?String(v.km):p.km)}))};
+ const cur=(s.vehicles.find(v=>v.plate===f.plate)||{}).km;
+ const mp=(s.fuelPrices||{})[(f.date||'').slice(0,7)]||0;
+ const pu=f.price!==''?+f.price:mp;
+ const total=pu>0&&f.liters!==''&&+f.liters>0?Math.round(+f.liters*pu*100)/100:0;
+ const sub=()=>{
+  if(!f.plate)return setE('Escolha o veículo.');
+  if(!f.date)return setE('Informe a data do abastecimento.');
+  if(f.km===''||!(+f.km>=0))return setE(mt(s,f.plate).eq?'Informe o horímetro do equipamento no abastecimento.':'Informe a quilometragem do veículo no abastecimento.');
+  if(f.liters===''||!(+f.liters>0))return setE('Informe os litros abastecidos (maior que zero).');
+  if(f.price!==''&&!(+f.price>=0))return setE('Preço por litro inválido (ou deixe em branco).');
+  const d={plate:f.plate,date:f.date,km:+f.km,liters:+f.liters,value:total,price:pu>0?pu:null,auto:f.price===''&&mp>0,full:f.full==='1',note:(f.note||'').trim()};
+  mut(n=>{if(edit){const i=n.fuel.findIndex(x=>x.id===init.id);if(i>=0)n.fuel[i]={...n.fuel[i],...d}}else n.fuel.push({...d,id:Math.max(0,...n.fuel.map(x=>x.id||0))+1});bump(n,d.plate,d.km)});
+  close()};
+ if(!s.vehicles.length)return html`<p class="text-sm">Cadastre um veículo na aba Frota antes de registrar abastecimentos.</p>`;
+ return html`<div class="grid grid-cols-2 gap-3">
+  <${Fld} l="Veículo"><${Sel} v=${f.plate} on=${chPlate} opts=${s.vehicles.map(v=>[v.plate,v.plate+' · '+v.model])}/><//>
+  <${Fld} l="Data"><${Inp} type="date" v=${f.date} on=${u('date')}/><//>
+  <${Fld} l=${mt(s,f.plate).eq?"Horímetro do equipamento no abastecimento (h)":"Km do veículo no abastecimento"}><${Inp} type="number" step="1" v=${f.km} on=${u('km')}/><//>
+  <${Fld} l="Litros abastecidos"><${Inp} type="number" step="0.01" v=${f.liters} on=${u('liters')} ph="0,00"/><//>
+  <${Fld} l=${mp>0?'Preço por litro (R$) · vazio = preço do mês':'Preço por litro (R$)'}><${Inp} type="number" step="0.001" v=${f.price} on=${u('price')} ph=${mp>0?'Mês: '+mp.toFixed(3).replace('.',','):'0,000'}/><//>
+  <${Fld} l="Valor total (R$) · calculado"><input class=${IN} readOnly tabIndex="-1" aria-live="polite" value=${pu>0&&total>0?brl(total):'—'}/><//>
+  <div class="col-span-2"><${Fld} l="Tanque cheio?"><${Sel} v=${f.full} on=${u('full')} opts=${[['1','Sim, completei o tanque'],['0','Não, abastecimento parcial']]}/><//></div>
+  <div class="col-span-2"><${Fld} l="Observação (opcional)"><${Inp} v=${f.note} on=${u('note')} ph="Posto, combustível..."/><//></div>
+ </div><p class="mt-2 text-xs text-mute">O valor total é litros × preço por litro, calculado automaticamente. ${f.price!==''?'Usando o preço informado.':mp>0?'Usando o preço do mês '+monthLbl((f.date||"").slice(0,7))+' ('+brl3(mp)+').':'Não há preço cadastrado para o mês da data; informe o preço ou cadastre o preço do mês na tela de abastecimentos.'} ${mt(s,f.plate).eq?'O horímetro do equipamento':'O km do veículo'} (${mv(s,f.plate,cur)} hoje) é atualizado automaticamente quando o valor informado for maior. O consumo médio (${mt(s,f.plate).eq?'L/h':'km/L'}) usa abastecimentos com tanque cheio.</p>
+ <${Foot} err=${err} close=${close} ok=${sub} label=${edit?'Salvar abastecimento':'Registrar abastecimento'}/>`}
+
+function Abastecimentos({s,mut,setM}){
+ const [pl,setPl]=useState('');const [del,setDel]=useState('');const [im,setIm]=useState(false);const [dl,setDl]=useState(null);const [busy,setBusy]=useState(false);const [msg,setMsg]=useState('');
+ useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
+ const all=s.fuel||[];
+ const vs=s.vehicles.filter(v=>!pl||v.plate===pl);
+ const st=vs.map(v=>({v,r:fuelStats(s,v.plate)}));
+ const rows=[...all].filter(x=>!pl||x.plate===pl).sort((a,b)=>b.date.localeCompare(a.date)||b.km-a.km);
+ const dash=x=>x==null?'—':x;
+ return html`<div class="flex flex-wrap gap-2 items-end mb-4">
+  <div class="w-48"><${Sel} v=${pl} on=${e=>setPl(e.target.value)} opts=${[['','Todos os veículos'],...s.vehicles.map(v=>[v.plate,v.plate])]}/></div>
+  <div class="sm:ml-auto flex gap-2">${dl&&html`<${Btn} on=${async()=>{if(busy)return;setBusy(true);setMsg('');try{const f=await exportFuelXlsx(s,rows,vs.map(v=>v.plate));await dl.save(f);setMsg('Excel salvo.')}catch(e){setMsg(e&&e.code==='declined'?'Download cancelado.':'Não foi possível gerar o Excel agora. Tente de novo.')}setBusy(false)}}>${busy?'Gerando…':'Exportar Excel (.xlsx)'}<//>`}<${Btn} on=${()=>setIm(true)}>Importar Excel (.xlsx)<//><${Btn} p=${1} on=${()=>setM({k:'fuel',plate:pl||undefined})}>Registrar abastecimento<//></div></div>
+ ${msg&&html`<p class="-mt-2 mb-3 text-sm text-mute" role="status">${msg}</p>`}
+ <${FuelPrices} s=${s} mut=${mut}/>
+ <div class="mb-1 font-head text-xl font-semibold">Média percorrida por veículo</div>
+ <div class="mb-5 overflow-x-auto rounded-lg border border-line bg-panel"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Veículo / equipamento','Km / horímetro atual','Abastecimentos','Rodado no período','Média por dia','Média por mês','Consumo médio','Litros','Gasto','Preço médio/L','Último abastecimento'].map(c=>html`<th key=${c} class="font-medium px-3 py-2">${c}</th>`)}</tr></thead><tbody>
+  ${st.map(({v,r})=>html`<tr key=${v.plate} class="border-t border-line"><td class="px-3 py-2 font-semibold">${v.plate}<div class="text-xs font-normal text-mute">${v.model}</div></td><td class="px-3 py-2 tabular-nums">${mv(s,v.plate,v.km)}</td><td class="px-3 py-2 tabular-nums">${r.n}</td><td class="px-3 py-2 tabular-nums">${r.dist==null?'—':mv(s,v.plate,r.dist)}</td><td class="px-3 py-2 tabular-nums font-semibold">${r.perDay==null?'—':(mt(s,v.plate).eq?f1(r.perDay):N(Math.round(r.perDay)))+' '+mt(s,v.plate).u+'/dia'}</td><td class="px-3 py-2 tabular-nums font-semibold">${r.perMonth==null?'—':(mt(s,v.plate).eq?f1(r.perMonth):N(Math.round(r.perMonth)))+' '+mt(s,v.plate).u+'/mês'}</td><td class="px-3 py-2 tabular-nums font-semibold">${r.kmL==null?'—':mt(s,v.plate).eq?f2(1/r.kmL)+' L/h':f2(r.kmL)+' km/L'}</td><td class="px-3 py-2 tabular-nums">${r.n?f1(r.liters)+' L':'—'}</td><td class="px-3 py-2 tabular-nums">${r.value>0?brl(r.value):'—'}</td><td class="px-3 py-2 tabular-nums">${r.priceL==null?'—':brl(r.priceL)}</td><td class="px-3 py-2">${r.last?fmtD(r.last.date)+' · '+mv(s,v.plate,r.last.km):'—'}</td></tr>`)}
+  </tbody></table>${!st.length&&html`<p class="p-4 text-sm text-mute">Cadastre veículos na aba Frota para registrar abastecimentos.</p>`}</div>
+ <p class="-mt-3 mb-5 text-xs text-mute">A média por dia e por mês (30 dias) usa o primeiro e o último abastecimento do veículo. O consumo médio precisa de pelo menos 2 abastecimentos com tanque cheio.</p>
+ <div class="mb-1 font-head text-xl font-semibold">Abastecimentos registrados</div>
+ <div class="overflow-x-auto rounded-lg border border-line bg-panel"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Data','Veículo','Km / horímetro','Litros','Valor','Preço/L','Tanque cheio','Observação',''].map(c=>html`<th key=${c} class="font-medium px-3 py-2">${c}</th>`)}</tr></thead><tbody>
+  ${rows.map(x=>html`<tr key=${x.id} class="border-t border-line"><td class="px-3 py-2">${fmtD(x.date)}</td><td class="px-3 py-2 font-semibold">${x.plate}</td><td class="px-3 py-2 tabular-nums">${mv(s,x.plate,x.km)}</td><td class="px-3 py-2 tabular-nums">${f2(x.liters)} L</td><td class="px-3 py-2 tabular-nums">${x.value>0?brl(x.value):'—'}</td><td class="px-3 py-2 tabular-nums">${x.value>0?brl(x.value/x.liters):'—'}</td><td class="px-3 py-2">${x.full?'Sim':'Não'}</td><td class="px-3 py-2 max-w-[240px] truncate" title=${x.note||''}>${x.note||'—'}</td>
+   <td class="px-3 py-2 text-right"><span class="inline-flex gap-2"><${Btn} sm=${1} on=${()=>setM({k:'fuel',fuel:x})}>Editar<//>${del===x.id?html`<${Btn} sm=${1} on=${()=>{mut(n=>{n.fuel=n.fuel.filter(y=>y.id!==x.id)});setDel('')}}>Confirmar exclusão<//>`:html`<${Btn} sm=${1} on=${()=>setDel(x.id)}>Excluir<//>`}</span></td></tr>`)}
+  </tbody></table>${!rows.length&&html`<p class="p-4 text-sm text-mute">${all.length?'Nenhum abastecimento para este veículo.':'Nenhum abastecimento registrado ainda. Clique em Registrar abastecimento: o km (veículo) ou horímetro (equipamento) é atualizado e a média é calculada.'}</p>`}</div>${im&&html`<${Modal} title="Importar abastecimentos do Excel" close=${()=>setIm(false)} wide><${ImportFuel} s=${s} mut=${mut} close=${()=>setIm(false)}/><//>`}`}
+
+function VehicleForm({s,mut,close,kind}){
+ const [f,u]=useF({kind:kind==='equipamento'?'equipamento':'veiculo',plate:'',model:'',km:''});const [err,setE]=useState('');
+ const eq=f.kind==='equipamento';
+ const sub=()=>{const p=f.plate.trim().toUpperCase();
+  if(!p||!f.model.trim())return setE(eq?'Informe a identificação e o modelo.':'Informe placa e modelo.');
+  if(s.vehicles.some(v=>v.plate===p))return setE(eq?'Essa identificação já está cadastrada.':'Essa placa já está cadastrada.');
+  if(f.km===''||+f.km<0)return setE(eq?'Informe o horímetro atual.':'Informe a quilometragem atual.');
+  mut(n=>{n.vehicles.push({plate:p,model:f.model.trim(),km:+f.km,kind:f.kind,axles:defAxles()});n.vehicles.sort(byPlate)});close()};
+ return html`<div class="grid gap-3"><${Fld} l="Tipo de cadastro"><${Sel} v=${f.kind} on=${u('kind')} opts=${[['veiculo','Veículo (conta quilometragem, km)'],['equipamento','Equipamento (conta horímetro, horas)']]}/><//>
+  <${Fld} l=${eq?'Identificação / patrimônio':'Placa'}><${Inp} v=${f.plate} on=${u('plate')} ph=${eq?'EQ-001':'ABC-1D23'}/><//><${Fld} l="Modelo"><${Inp} v=${f.model} on=${u('model')}/><//>
+  <${Fld} l=${eq?'Horímetro atual (h)':'Km atual'}><${Inp} type="number" step=${eq?'0.1':'1'} v=${f.km} on=${u('km')}/><//></div>
+  <p class="mt-2 text-xs text-mute">${eq?'Equipamentos usam horímetro (horas de trabalho) no lugar da quilometragem em instalações, trocas, serviços e abastecimentos.':'Veículos usam quilometragem (km).'}</p>
+  <${Foot} err=${err} close=${close} ok=${sub} label=${eq?'Cadastrar equipamento':'Cadastrar veículo'}/>`}
+
+function InstallForm({s,mut,close,plate,pos}){
+ const stock=s.tires.filter(t=>t.status==='estoque');
+ const p0=plate||s.vehicles[0].plate;
+ const [f,u,setF]=useF({tire:stock[0]?stock[0].id:'',plate:p0,pos:pos||(posList(s,p0)[0]||[''])[0],km:String(vkm(s,p0)),date:today()});
+ const [err,setE]=useState('');
+ const sub=()=>{
+  if(!f.tire)return setE('Não há pneu em estoque. Cadastre um pneu ou devolva um recapado ao estoque.');
+  if(!f.pos)return setE('Este veículo não tem eixos. Cadastre-os na aba Aplicação.');
+  if(s.tires.some(t=>t.status==='uso'&&t.plate===f.plate&&t.pos===f.pos))return setE('Essa posição já tem um pneu. Retire-o ou use Substituir.');
+  if(f.km===''||+f.km<0)return setE('Informe '+(mt(s,f.plate).eq?'o horímetro':'a km')+' de instalação.');
+  mut(n=>{const t=tireOf(n,f.tire);doInstall(n,t,f.plate,f.pos,+f.km);log(n,{date:f.date,type:'Instalação',reason:'—',tireId:t.id,plate:f.plate,pos:f.pos,km:+f.km,cost:0})});close()};
+ return html`<div class="grid gap-3">
+  <${Fld} l="Pneu em estoque"><${Sel} v=${f.tire} on=${u('tire')} opts=${stock.length?tireOpts(stock,s):[['','Nenhum pneu em estoque']]}/><//>
+  <${Fld} l="Veículo"><${Sel} v=${f.plate} on=${e=>setF({...f,plate:e.target.value,pos:(posList(s,e.target.value)[0]||[''])[0],km:String(vkm(s,e.target.value))})} opts=${s.vehicles.map(v=>[v.plate,v.plate+' · '+v.model])}/><//>
+  <${Fld} l="Posição (eixo)"><${Sel} v=${f.pos} on=${u('pos')} opts=${posList(s,f.plate).length?posList(s,f.plate):[['','Sem eixos cadastrados']]}/><//>
+  <div class="grid grid-cols-2 gap-3"><${Fld} l=${mt(s,f.plate).L+' na instalação'}><${Inp} type="number" v=${f.km} on=${u('km')}/><//><${Fld} l="Data"><${Inp} type="date" v=${f.date} on=${u('date')}/><//></div></div>
+  <${Foot} err=${err} close=${close} ok=${sub} label="Instalar pneu"/>`}
+
+function RemoveForm({s,mut,close,tire}){
+ const use=inUse(s);const t0=tire||(use[0]&&use[0].id)||'';
+ const tt=id=>s.tires.find(t=>t.id===id);
+ const [f,u,setF]=useF({tire:t0,km:String(t0?vkm(s,tt(t0).plate):''),dest:'estoque',reason:'Desgaste',cost:'0',date:today(),rc:String(t0&&tt(t0)?(tt(t0).recaps||0):0)});
+ const [err,setE]=useState('');
+ const sub=()=>{const t=tt(f.tire),km=+f.km;
+  if(!t)return setE('Selecione um pneu em uso.');
+  if(f.km===''||km<t.kmIn)return setE('O valor de retirada não pode ser menor que o de instalação ('+mv(s,t.plate,t.kmIn)+').');
+  if(f.dest==='recapagem'&&(f.rc===''||!(+f.rc>=0)||!Number.isInteger(+f.rc)))return setE('Informe quantas recapagens o pneu já recebeu (número inteiro, use 0 se nenhuma).');
+  mut(n=>{const x=tireOf(n,f.tire),{plate,pos}=x;doRemove(n,x,km,f.dest);if(f.dest==='recapagem')x.recaps=+f.rc;bump(n,plate,km);log(n,{date:f.date,type:'Retirada',reason:f.reason,tireId:x.id,plate,pos,km,cost:+f.cost||0,note:f.dest==='recapagem'?'Enviado para recapagem · '+(+f.rc)+' recapagem(ns) já feita(s)':''})});close()};
+ return html`<div class="grid gap-3">
+  <${Fld} l="Pneu em uso"><${Sel} v=${f.tire} on=${e=>setF({...f,tire:e.target.value,km:String(vkm(s,tt(e.target.value).plate)),rc:String(tt(e.target.value).recaps||0)})} opts=${use.length?tireOpts(use,s):[['','Nenhum pneu em uso']]}/><//>
+  <div class="grid grid-cols-2 gap-3"><${Fld} l=${mt(s,(tt(f.tire)||{}).plate).L+' na retirada'}><${Inp} type="number" v=${f.km} on=${u('km')}/><//><${Fld} l="Data"><${Inp} type="date" v=${f.date} on=${u('date')}/><//>
+  <${Fld} l="Motivo"><${Sel} v=${f.reason} on=${u('reason')} opts=${['Desgaste','Furo','Dano','Fim de vida'].map(x=>[x,x])}/><//>
+  <${Fld} l="Destino do pneu"><${Sel} v=${f.dest} on=${u('dest')} opts=${[['estoque','Estoque'],['recapagem','Recapagem'],['sucata','Sucata']]}/><//></div>
+  <${Fld} l="Custo (R$)"><${Inp} type="number" step="0.01" v=${f.cost} on=${u('cost')}/><//>
+  ${f.dest==='recapagem'&&html`<div class="rounded-md border border-line bg-bg p-3"><${Fld} l="Quantas recapagens este pneu já recebeu?"><${Inp} type="number" step="1" v=${f.rc} on=${u('rc')} ph="0"/><//><p class="mt-1 text-xs text-mute">Não conte a que está sendo enviada agora. Use 0 se o pneu nunca foi recapado.</p></div>`}</div>
+  <${Foot} err=${err} close=${close} ok=${sub} label="Retirar pneu"/>`}
+
+const DEST=[['estoque','Voltar ao estoque','Ainda tem vida útil'],['recapagem','Recapagem','Enviar para recapar'],['sucata','Descarte','Sai da frota como sucata']];
+function SwapForm({s,mut,close,tire}){
+ const use=inUse(s),stock=s.tires.filter(t=>t.status==='estoque');
+ const o0=tire||(use[0]&&use[0].id)||'';const tt=id=>s.tires.find(t=>t.id===id);
+ const [f,u,setF]=useF({old:o0,nw:stock[0]?stock[0].id:'',reason:'Desgaste',km:String(o0?vkm(s,tt(o0).plate):''),cost:'0',dest:'recapagem',date:today(),rc:String(o0&&tt(o0)?(tt(o0).recaps||0):0)});
+ const [err,setE]=useState('');
+ const o=tt(f.old),inc=tt(f.nw);
+ const sub=()=>{const km=+f.km;
+  if(!o)return setE('Não há pneu em uso para substituir.');
+  if(f.km===''||km<o.kmIn)return setE('O valor da troca não pode ser menor que o de instalação ('+mv(s,o.plate,o.kmIn)+').');
+  if(f.cost===''||+f.cost<0)return setE('Informe o custo da troca (use 0 se não houve).');
+  if(f.dest==='recapagem'&&(f.rc===''||!(+f.rc>=0)||!Number.isInteger(+f.rc)))return setE('Informe quantas recapagens o pneu já recebeu (número inteiro, use 0 se nenhuma).');
+  mut(n=>{const a=tireOf(n,f.old),{plate,pos}=a;doRemove(n,a,km,f.dest);if(f.dest==='recapagem')a.recaps=+f.rc;bump(n,plate,km);const rn=f.dest==='recapagem'?'Pneu '+a.id+' enviado para recapagem · '+(+f.rc)+' recapagem(ns) já feita(s)':'';
+   if(f.nw){const b=tireOf(n,f.nw);doInstall(n,b,plate,pos,km);log(n,{date:f.date,type:'Troca',reason:f.reason,tireId:b.id,tireOut:a.id,plate,pos,km,cost:+f.cost,note:rn})}
+   else log(n,{date:f.date,type:'Retirada',reason:f.reason,tireId:a.id,plate,pos,km,cost:+f.cost,note:rn})});close()};
+ return html`<div class="grid gap-3">
+  ${tire&&o?html`<div class="rounded-md border border-line bg-bg p-3 text-sm"><b>${o.plate}</b> · ${o.pos}<div class="text-mute">Sai: ${o.id} · ${o.brand} ${o.model} · ${o.size} · ${o.tread==null?'sem medição de sulco':'sulco '+Number(o.tread).toFixed(1)+' mm'}</div></div>`
+   :html`<${Fld} l="Pneu a substituir"><${Sel} v=${f.old} on=${e=>setF({...f,old:e.target.value,km:String(vkm(s,tt(e.target.value).plate)),rc:String(tt(e.target.value).recaps||0)})} opts=${use.length?tireOpts(use,s):[['','Nenhum pneu em uso']]}/><//>`}
+  <${Fld} l="Pneu que entra (estoque)"><${Sel} v=${f.nw} on=${u('nw')} opts=${[['','Nenhum, deixar a posição vazia'],...tireOpts(stock,s)]}/><//>
+  ${o&&inc&&inc.size!==o.size&&html`<p class="text-sm text-warn">A medida do pneu que entra (${inc.size}) é diferente da do pneu que sai (${o.size}).</p>`}
+  <div class="text-sm"><span class="text-mute">Destino do pneu que sai</span>
+   <div class="mt-1 grid grid-cols-3 gap-2">${DEST.map(d=>html`<button type="button" key=${d[0]} aria-pressed=${f.dest===d[0]} onClick=${()=>setF({...f,dest:d[0]})} class=${'rounded-md border-2 p-2 text-left '+(f.dest===d[0]?'border-brand bg-brand text-onbrand':'border-line')}><div class="font-semibold">${d[1]}</div><div class="text-xs opacity-80">${d[2]}</div></button>`)}</div></div>
+    ${f.dest==='recapagem'&&html`<div class="rounded-md border border-line bg-bg p-3"><${Fld} l="Quantas recapagens este pneu já recebeu?"><${Inp} type="number" step="1" v=${f.rc} on=${u('rc')} ph="0"/><//><p class="mt-1 text-xs text-mute">Não conte a que está sendo enviada agora. Use 0 se o pneu nunca foi recapado.</p></div>`}
+  <div class="grid grid-cols-2 gap-3"><${Fld} l="Motivo"><${Sel} v=${f.reason} on=${u('reason')} opts=${[['Desgaste','Desgaste'],['Furo','Furo'],['Dano','Dano']]}/><//>
+  <${Fld} l="Data"><${Inp} type="date" v=${f.date} on=${u('date')}/><//>
+  <${Fld} l=${mt(s,(tt(f.old)||{}).plate).eq?'Horímetro atual (h)':'Km atual'}><${Inp} type="number" v=${f.km} on=${u('km')}/><//><${Fld} l="Custo (R$)"><${Inp} type="number" step="0.01" v=${f.cost} on=${u('cost')}/><//></div></div>
+  <${Foot} err=${err} close=${close} ok=${sub} label=${f.nw?'Registrar troca':'Retirar pneu'}/>`}
+
+function EditInstForm({s,mut,close,tire}){
+ const t=s.tires.find(x=>x.id===tire);
+ const isInst=h=>t&&h.tireId===t.id&&(h.type==='Instalação'||h.type==='Troca')&&h.plate===t.plate&&h.pos===t.pos&&!h.past;
+ const h0=t?s.history.find(isInst):null;
+ const stock=s.tires.filter(x=>x.status==='estoque');
+ const [f,u,setF]=useF({tire:t?t.id:'',plate:t?t.plate:'',pos:t?t.pos:'',km:t?String(t.kmIn):'',date:h0?h0.date:today()});
+ const [err,setE]=useState('');
+ if(!t)return html`<p class="text-sm">Esse pneu não está mais instalado.</p>`;
+ const sub=()=>{
+  if(f.km===''||+f.km<0)return setE('Informe '+(mt(s,f.plate).eq?'o horímetro':'a km')+' de instalação.');
+  if(!f.date||f.date>today())return setE('Informe uma data de instalação que não seja futura.');
+  if(!f.pos)return setE('Escolha uma posição. Cadastre os eixos do veículo na aba Aplicação.');
+  const other=s.tires.find(x=>x.status==='uso'&&x.plate===f.plate&&x.pos===f.pos&&x.id!==t.id);
+  if(other)return setE('A posição já está ocupada pelo pneu '+other.id+'. Use Rodízio para trocar os dois de lugar.');
+  const km=+f.km;
+  mut(n=>{const a=tireOf(n,t.id),old={plate:t.plate,pos:t.pos};
+   if(f.tire!==t.id){const b=tireOf(n,f.tire);a.status='estoque';a.plate=null;a.pos=null;a.kmIn=null;doInstall(n,b,f.plate,f.pos,km)}
+   else{a.plate=f.plate;a.pos=f.pos;a.kmIn=km;bump(n,f.plate,km)}
+   const hh=n.history.find(x=>x.tireId===t.id&&(x.type==='Instalação'||x.type==='Troca')&&x.plate===old.plate&&x.pos===old.pos&&!x.past);
+   if(hh){hh.date=f.date;hh.km=km;hh.plate=f.plate;hh.pos=f.pos;hh.tireId=f.tire;hh.note=(hh.note?hh.note+' · ':'')+'Corrigido em '+fmtD(today())}});
+  close()};
+ return html`<p class="mb-3 rounded-md border border-line bg-bg p-3 text-sm text-mute">Use para corrigir um lançamento errado. O registro de instalação no Histórico é atualizado com os novos dados. Para um pneu que realmente saiu ou foi trocado, use Substituir ou Retirar.</p>
+ <div class="grid gap-3">
+  <${Fld} l="Pneu instalado"><${Sel} v=${f.tire} on=${u('tire')} opts=${tireOpts([t,...stock],s)}/><//>
+  <${Fld} l="Veículo"><${Sel} v=${f.plate} on=${e=>setF({...f,plate:e.target.value,pos:(posList(s,e.target.value)[0]||[''])[0]})} opts=${s.vehicles.map(v=>[v.plate,v.plate+' · '+v.model])}/><//>
+  <${Fld} l="Posição (eixo)"><${Sel} v=${f.pos} on=${u('pos')} opts=${posList(s,f.plate).length?posList(s,f.plate):[['','Sem eixos cadastrados']]}/><//>
+  <div class="grid grid-cols-2 gap-3"><${Fld} l=${mt(s,f.plate).L+' na instalação'}><${Inp} type="number" v=${f.km} on=${u('km')}/><//><${Fld} l="Data da instalação"><${Inp} type="date" v=${f.date} on=${u('date')}/><//></div></div>
+ <${Foot} err=${err} close=${close} ok=${sub} label="Salvar correção"/>`}
+
+function RotateForm({s,mut,close,tire}){
+ const use=inUse(s);const o0=tire||(use[0]&&use[0].id)||'';const tt=id=>s.tires.find(t=>t.id===id);
+ const [f,u,setF]=useF({tire:o0,pos:o0?(posList(s,tt(o0).plate).find(x=>x[0]!==tt(o0).pos)||[''])[0]:'',km:String(o0?vkm(s,tt(o0).plate):''),cost:'0',date:today()});
+ const [err,setE]=useState('');
+ const sub=()=>{const t=tt(f.tire),km=+f.km;
+  if(!t)return setE('Selecione um pneu em uso.');
+  if(t.pos===f.pos)return setE('Escolha uma posição diferente da atual.');
+  if(f.km===''||km<t.kmIn)return setE('O valor do rodízio não pode ser menor que o de instalação ('+mv(s,t.plate,t.kmIn)+').');
+  mut(n=>{const a=tireOf(n,f.tire),b=n.tires.find(x=>x.status==='uso'&&x.plate===a.plate&&x.pos===f.pos),old=a.pos;
+   a.pos=f.pos;if(b)b.pos=old;bump(n,a.plate,km);
+   log(n,{date:f.date,type:'Rodízio',reason:'Rodízio',tireId:a.id,tireOut:b?b.id:null,plate:a.plate,pos:old+' → '+f.pos,km,cost:+f.cost||0})});close()};
+ const t=tt(f.tire),other=t&&s.tires.find(x=>x.status==='uso'&&x.plate===t.plate&&x.pos===f.pos&&x.id!==t.id);
+ return html`<div class="grid gap-3">
+  <${Fld} l="Pneu em uso"><${Sel} v=${f.tire} on=${e=>{const x=tt(e.target.value);setF({...f,tire:x.id,pos:(posList(s,x.plate).find(y=>y[0]!==x.pos)||[''])[0],km:String(vkm(s,x.plate))})}} opts=${use.length?tireOpts(use,s):[['','Nenhum pneu em uso']]}/><//>
+  <${Fld} l="Nova posição"><${Sel} v=${f.pos} on=${u('pos')} opts=${t?posList(s,t.plate):[['','—']]}/><//>
+  ${other&&html`<p class="text-sm text-mute">A posição está ocupada pelo ${other.id}. Os dois pneus trocam de lugar.</p>`}
+  <div class="grid grid-cols-3 gap-3"><${Fld} l=${mt(s,(tt(f.tire)||{}).plate).eq?'Horímetro atual (h)':'Km atual'}><${Inp} type="number" v=${f.km} on=${u('km')}/><//><${Fld} l="Custo (R$)"><${Inp} type="number" step="0.01" v=${f.cost} on=${u('cost')}/><//><${Fld} l="Data"><${Inp} type="date" v=${f.date} on=${u('date')}/><//></div></div>
+  <${Foot} err=${err} close=${close} ok=${sub} label="Registrar rodízio"/>`}
+
+const TireIcon=({s})=>html`<svg width=${s||20} height=${s||20} viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" strokeWidth="4"/><circle cx="12" cy="12" r="9.5" fill="none" stroke="rgba(140,146,153,.9)" strokeWidth="1.6" strokeDasharray="1.4 2.6"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="1.6"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg>`;
+const ICP={
+ grid:()=>html`<g><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></g>`,
+ truck:()=>html`<g><path d="M2 6h12v10H2z"/><path d="M14 9h4l4 4v3h-8z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></g>`,
+ axle:()=>html`<g><rect x="2" y="6" width="4" height="12" rx="1.5"/><rect x="18" y="6" width="4" height="12" rx="1.5"/><path d="M6 12h12"/></g>`,
+ chart:()=>html`<g><path d="M4 20V11"/><path d="M10 20V4"/><path d="M16 20v-6"/><path d="M2 20h20"/></g>`,
+ clock:()=>html`<g><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></g>`,
+ fuel:()=>html`<g><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M3 21h12"/><path d="M7 8h4"/><path d="M14 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3"/></g>`,
+ wrench:()=>html`<g><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7 6.3 21l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/></g>`,
+ users:()=>html`<g><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M17 14.2c2.6.2 4.5 2 4.5 5.3"/></g>`
+};
+const Ico=({n})=>n==='tire'?html`<${TireIcon} s=${20}/>`:html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">${ICP[n]()}</svg>`;
+
+function VehMini({s,v,size}){
+ const md=size==='md',w=md?26:16,h=md?48:30;
+ const wheel=p=>{const t=s.tires.find(x=>x.status==='uso'&&x.plate===v.plate&&x.pos===p.key);
+  const bc=t&&t.tread!=null?(t.tread<=1.6?'var(--bad)':t.tread<=3?'#C2410C':null):null;
+  return html`<i key=${p.key} class=${'tire-s '+(t?'':'empty')} style=${{width:w,height:h,flex:'none',...(bc?{borderColor:bc}:{})}} title=${p.key+(t?' · '+t.id:' · vazio')}></i>`};
+ const body=(v.axles||[]).filter(a=>a.type!=='est'),spare=(v.axles||[]).filter(a=>a.type==='est');
+ if(!(v.axles||[]).length)return html`<p class="text-xs text-mute">Sem eixos cadastrados</p>`;
+ return html`<div class="relative mx-auto" style=${{width:md?'200px':'120px'}}>
+  <i class="absolute inset-y-0 left-1/2 w-1.5 -translate-x-1/2 rounded bg-line"></i>
+  <div class="relative mx-auto mb-2 rounded-t-xl rounded-b border border-line bg-bg" style=${{width:'44%',height:md?'18px':'12px'}}></div>
+  ${body.map(a=>{const ps=posOf({axles:[a]}),hh=Math.floor(ps.length/2);return html`<div key=${a.id} class="relative mb-2 flex items-center justify-center gap-0.5">${ps.slice(0,hh).map(p=>wheel(p))}<i class="h-1.5 flex-1 rounded" style=${{background:'var(--mute)'}}></i>${ps.slice(hh).map(p=>wheel(p))}</div>`})}
+  ${spare.map(a=>html`<div key=${a.id} class="mt-2 flex justify-center border-t border-line pt-2">${posOf({axles:[a]}).map(p=>wheel(p))}</div>`)}</div>`}
+
+function VehCard({s,v,al,onOpen}){
+ const all=posOf(v),filled=all.filter(p=>s.tires.some(t=>t.status==='uso'&&t.plate===v.plate&&t.pos===p.key)).length,nal=al.filter(a=>a.t.plate===v.plate).length;
+ return html`<button type="button" onClick=${onOpen} class="flex gap-4 rounded-md border border-line bg-panel p-4 text-left hover:border-accent" aria-label=${'Abrir informações do veículo '+v.plate}>
+  <div class="shrink-0" style=${{width:'120px'}}><${VehMini} s=${s} v=${v}/></div>
+  <div class="min-w-0"><div class="font-head text-2xl font-semibold leading-none">${v.plate}</div><div class="mt-1 truncate text-sm text-mute">${v.model}</div><div class="mt-2 text-sm">${mv(s,v.plate,v.km)}</div><div class="text-sm text-mute">${filled} de ${all.length} posições com pneu</div>${nal>0&&html`<div class="mt-2 inline-block rounded border border-warn px-2 py-0.5 text-xs text-warn">${nal} ${nal===1?'alerta':'alertas'}</div>`}</div></button>`}
+
+function VehInfo({s,plate,close,goVeh}){
+ const v=s.vehicles.find(x=>x.plate===plate);
+ if(!v)return html`<p class="text-sm">Veículo não encontrado.</p>`;
+ const pos=posOf(v).map(p=>({p,t:s.tires.find(t=>t.status==='uso'&&t.plate===plate&&t.pos===p.key)}));
+ const n=pos.filter(x=>x.t).length,Hh=sortH(s.history.filter(h=>h.plate===plate)),cost=Hh.reduce((a,h)=>a+(h.cost||0),0),Sv=svcSorted((s.services||[]).filter(x=>x.plate===plate)),svCost=Sv.reduce((a,x)=>a+x.value,0),Fs=fuelStats(s,plate);
+ const Tl=({l,v})=>html`<div class="rounded-md border border-line p-2 text-sm"><div class="text-mute">${l}</div><b>${v}</b></div>`;
+ return html`<div class="grid gap-5 md:grid-cols-5">
+  <div class="md:col-span-2"><${VehMini} s=${s} v=${v} size="md"/></div>
+  <div class="md:col-span-3"><div class="font-head text-3xl font-semibold leading-none">${v.plate}</div><div class="text-mute">${v.model}</div>
+   <div class="mt-3 grid grid-cols-2 gap-2"><${Tl} l=${mt(s,plate).eq?'Horímetro':'Quilometragem'} v=${mv(s,plate,v.km)}/><${Tl} l="Pneus instalados" v=${n+' de '+pos.length}/><${Tl} l="Registros no histórico" v=${Hh.length}/><${Tl} l="Custo total" v=${brl(cost)}/><${Tl} l="Serviços registrados" v=${Sv.length}/><${Tl} l="Custo de serviços" v=${brl(svCost)}/><${Tl} l="Consumo médio" v=${Fs.kmL==null?'—':mt(s,plate).eq?f2(1/Fs.kmL)+' L/h':f2(Fs.kmL)+' km/L'}/><${Tl} l="Média percorrida" v=${Fs.perMonth==null?'—':N(Math.round(Fs.perMonth))+' '+mt(s,plate).u+'/mês · '+N(Math.round(mt(s,plate).eq?Fs.perDay*10:Fs.perDay)/(mt(s,plate).eq?10:1))+' '+mt(s,plate).u+'/dia'}/></div></div></div>
+ <div class="mt-5"><div class="font-head text-xl font-semibold mb-2">Pneus instalados</div>
+  ${pos.length?html`<div class="overflow-x-auto"><table class="tbl w-full whitespace-nowrap text-sm"><thead><tr>${['Posição','Pneu','Medida','Sulco',mt(s,plate).eq?'Horas rodadas':'Km rodado'].map(h=>html`<th key=${h} class="px-3 py-2 text-left font-medium">${h}</th>`)}</tr></thead><tbody>
+   ${pos.map(({p,t})=>html`<tr key=${p.key} class="border-t border-line"><td class="px-3 py-2">${p.key}</td>${t?html`<td class="px-3 py-2 font-semibold">${t.id} · ${t.brand} ${t.model}</td><td class="px-3 py-2">${t.size}</td><td class="px-3 py-2">${t.tread==null?'—':Number(t.tread).toFixed(1)+' mm'}</td><td class="px-3 py-2 tabular-nums">${N(kmTire(s,t))}${t.kmVida>0?' de '+N(t.kmVida):''}</td>`:html`<td class="px-3 py-2 text-mute" colSpan="4">Vazio</td>`}</tr>`)}
+  </tbody></table></div>`:html`<p class="text-sm text-mute">Este veículo ainda não tem eixos. Cadastre-os na aba Aplicação.</p>`}</div>
+ <div class="mt-5"><div class="font-head text-xl font-semibold mb-2">Serviços do veículo</div>
+  ${Sv.length?html`<div class="overflow-x-auto"><table class="tbl w-full whitespace-nowrap text-sm"><thead><tr>${['Data','Serviço','Pneu',mt(s,plate).eq?'Horímetro':'Km','Valor','Observação'].map(c=>html`<th key=${c} class="px-3 py-2 text-left font-medium">${c}</th>`)}</tr></thead><tbody>
+   ${Sv.slice(0,20).map(x=>html`<tr key=${x.id} class="border-t border-line"><td class="px-3 py-2">${fmtD(x.date)}</td><td class="px-3 py-2 font-semibold">${SVC[x.type]||x.type}</td><td class="px-3 py-2">${x.tireId||'Todos'}</td><td class="px-3 py-2 tabular-nums">${x.km==null?'—':mv(s,plate,x.km)}</td><td class="px-3 py-2 tabular-nums">${brl(x.value)}</td><td class="px-3 py-2">${x.note||'—'}</td></tr>`)}
+  </tbody></table></div>${Sv.length>20&&html`<p class="mt-2 text-xs text-mute">Mostrando os 20 mais recentes de ${Sv.length}. Veja todos na aba Serviços.</p>`}`:html`<p class="text-sm text-mute">Nenhum serviço registrado para este veículo.</p>`}</div>
+ <div class="mt-5"><div class="font-head text-xl font-semibold mb-2">Histórico do veículo</div>
+  ${Hh.length?html`<div class="overflow-x-auto"><table class="tbl w-full whitespace-nowrap text-sm"><thead><tr>${['Data','Tipo','Motivo','Pneu','Posição',mt(s,plate).eq?'Horímetro':'Km','Valor unit.','Custo'].map(h=>html`<th key=${h} class="px-3 py-2 text-left font-medium">${h}</th>`)}</tr></thead><tbody>
+   ${Hh.slice(0,40).map(h=>html`<tr key=${h.id} class="border-t border-line"><td class="px-3 py-2">${fmtD(h.date)}</td><td class="px-3 py-2 font-semibold">${h.type}${h.past&&html` <span class="ml-1 rounded border border-line px-1.5 text-xs font-normal text-mute">Retroativo</span>`}</td><td class="px-3 py-2">${h.reason}</td><td class="px-3 py-2">${h.tireId}${h.tireOut?' / '+h.tireOut:''}</td><td class="px-3 py-2">${h.pos||'—'}</td><td class="px-3 py-2 tabular-nums">${mv(s,plate,h.km)}</td><td class="px-3 py-2 tabular-nums">${brlU(unitOf(s,h))}</td><td class="px-3 py-2 tabular-nums">${brl(h.cost)}</td></tr>`)}
+  </tbody></table></div>${Hh.length>40&&html`<p class="mt-2 text-xs text-mute">Mostrando os 40 mais recentes de ${Hh.length}. Veja todos na aba Histórico.</p>`}`:html`<p class="text-sm text-mute">Nenhum registro para este veículo ainda.</p>`}</div>
+ <div class="mt-5 flex justify-end gap-2"><${Btn} on=${close}>Fechar<//><${Btn} p=${1} on=${()=>{close();goVeh(plate)}}>Abrir na Aplicação<//></div>`}
+
+function VehSvg({v,inst}){
+ const TW=13,TH=26,GP=2,CW=96,RH=34,axles=v.axles||[];
+ const body=axles.filter(a=>a.type!=='est'),spare=axles.filter(a=>a.type==='est');
+ if(!axles.length)return html`<div class="grid h-[88px] place-items-center text-[11px] text-mute">Sem eixos</div>`;
+ const H=18+body.length*RH+(spare.length?TH+10:0)+2;
+ const tire=(x,y,key)=>{const t=inst[v.plate+'|'+key];
+  const sc=t&&t.tread!=null?(t.tread<=1.6?'var(--bad)':t.tread<=3?'#C2410C':'#8A6A00'):'#8A6A00';
+  return t?html`<rect key=${key} x=${x} y=${y} width=${TW} height=${TH} rx="3.5" fill="#F2B705" stroke=${sc} strokeWidth="1.8"/>`:html`<rect key=${key} x=${x} y=${y} width=${TW} height=${TH} rx="3.5" fill="none" stroke="var(--mute)" strokeWidth="1.2" strokeDasharray="2.5 2"/>`};
+ const els=[];
+ body.forEach((a,ai)=>{const ps=posOf({axles:[a]}),hh=Math.floor(ps.length/2),y=18+ai*RH,L=ps.slice(0,hh),R=ps.slice(hh);
+  const lEnd=2+L.length*(TW+GP)-GP,rStart=CW-2-R.length*(TW+GP)+GP;
+  els.push(html`<rect key=${'b'+a.id} x=${lEnd} y=${y+TH/2-2} width=${Math.max(0,rStart-lEnd)} height="4" rx="2" fill="var(--mute)"/>`);
+  L.forEach((p,i)=>els.push(tire(2+i*(TW+GP),y,p.key)));
+  R.forEach((p,i)=>els.push(tire(rStart+i*(TW+GP),y,p.key)))});
+ spare.forEach(a=>posOf({axles:[a]}).forEach(p=>els.push(tire(CW/2-TW/2,18+body.length*RH+4,p.key))));
+ return html`<svg viewBox=${'0 0 '+CW+' '+H} width="100%" height="88" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><rect x=${CW/2-2} y="12" width="4" height=${H-14} rx="2" fill="var(--line)"/><rect x=${CW/2-15} y="0" width="30" height="15" rx="6" fill="var(--bg)" stroke="var(--line)" strokeWidth="1.2"/>${els}</svg>`}
+
+function VehGrid({s,al,setM,eqm}){
+ const [q,setQ]=useState('');const [only,setOnly]=useState(false);const [lim,setLim]=useState(60);
+ const inst={};s.tires.forEach(t=>{if(t.status==='uso'&&t.plate)inst[t.plate+'|'+t.pos]=t});
+ const sev={};al.forEach(a=>{const p=a.t.plate;if(!p)return;if(a.lv==='bad')sev[p]='bad';else if(!sev[p])sev[p]='warn'});
+ const k=q.trim().toLowerCase().replace(/[\s-]/g,'');
+ const list=s.vehicles.filter(v=>(!k||(v.plate+v.model).toLowerCase().replace(/[\s-]/g,'').includes(k))&&(!only||sev[v.plate]));
+ const nAl=s.vehicles.filter(v=>sev[v.plate]).length;
+ return html`<div class="mt-5"><div class="flex flex-wrap items-end justify-between gap-2 mb-2"><div><div class="font-head text-xl font-semibold">${eqm?'Equipamentos':'Veículos'} da frota (${s.vehicles.length})</div><p class="text-sm text-mute">Clique em ${eqm?'um equipamento':'um veículo'} para ver as informações e o histórico dele.</p></div>
+  <div class="flex flex-wrap items-center gap-2"><div class="w-52"><input class=${IN+' !mt-0 !py-1.5 text-sm'} placeholder=${eqm?"Filtrar por identificação ou modelo":"Filtrar por placa ou modelo"} aria-label=${eqm?"Filtrar equipamentos":"Filtrar veículos"} value=${q} onChange=${e=>{setQ(e.target.value);setLim(60)}}/></div>
+   <button type="button" aria-pressed=${only} onClick=${()=>{setOnly(!only);setLim(60)}} class=${'rounded-md border px-3 py-1.5 text-sm '+(only?'border-warn bg-warn text-white':'border-line text-ink')}>Só com alertas (${nAl})</button></div></div>
+  <div class="grid gap-2" style=${{gridTemplateColumns:'repeat(auto-fill,minmax(104px,1fr))'}}>
+   ${list.slice(0,lim).map(v=>{const sv=sev[v.plate];return html`<button key=${v.plate} type="button" onClick=${()=>setM({k:'vinfo',plate:v.plate})} title=${v.plate+' · '+v.model+' · '+mv(s,v.plate,v.km)+(sv?' · com alerta':'')} aria-label=${'Abrir informações do veículo '+v.plate} class="relative rounded-md border border-line bg-panel px-2 pb-2 pt-3 text-center hover:border-accent">
+    ${sv&&html`<i class="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full" style=${{background:sv==='bad'?'var(--bad)':'var(--warn)'}}></i>`}
+    <${VehSvg} v=${v} inst=${inst}/><div class="mt-1 text-sm font-semibold leading-tight">${v.plate}</div><div class="truncate text-[11px] text-mute">${v.model}</div></button>`})}</div>
+  ${!list.length&&html`<p class="rounded-md border border-dashed border-line p-4 text-sm text-mute">Nenhum veículo encontrado com esse filtro.</p>`}
+  ${list.length>lim&&html`<div class="mt-3 text-center"><${Btn} on=${()=>setLim(lim+60)}>Mostrar mais (${list.length-lim} restantes)<//></div>`}</div>`}
+
+function Dashboard({s,go,setM}){
+ const c=k=>s.tires.filter(t=>t.status===k).length,al=alertsOf(s),tot=s.tires.length||1;
+ const CC=['var(--ok)','var(--mute)','var(--warn)','var(--bad)',al.length?'var(--accent)':'var(--mute)'];
+ const est=s.tires.filter(t=>t.status==='estoque'),bySize=grp(est,t=>t.size,()=>1),estVal=est.reduce((a,t)=>a+(t.price||0),0);
+ const cards=[['Em uso',c('uso'),'instalados em veículos e equipamentos'],['Em estoque',c('estoque'),brl(estVal)+' em valor'],['Em recapagem',c('recapagem'),'fora de operação'],['Sucateados',c('sucata'),brl(s.tires.filter(t=>t.status==='sucata').reduce((a,t)=>a+t.price,0))+' em perda'],['Alertas de troca',al.length,al.filter(a=>a.lv==='bad').length+' críticos']];
+ const svcs=s.services||[],tireTot=s.tires.reduce((a,t)=>a+(t.price||0),0),svcTot=svcs.reduce((a,x)=>a+(x.value||0),0),fuels=s.fuel||[],fuelTot=fuels.reduce((a,x)=>a+(x.value||0),0),fuelL=fuels.reduce((a,x)=>a+(x.liters||0),0);
+ const money=[['Total gasto em pneus',tireTot,s.tires.length+(s.tires.length===1?' pneu cadastrado':' pneus cadastrados')+' · valor de compra','var(--accent)','pneus'],['Total gasto em serviços',svcTot,svcs.length+(svcs.length===1?' serviço registrado':' serviços registrados')+' · alinhamento, balanceamento, rodízio e manutenção','var(--ok)','serv'],['Total gasto em combustível',fuelTot,fuels.length+(fuels.length===1?' abastecimento':' abastecimentos')+' · '+fuelL.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+' L','var(--warn)','fuel']];
+ const groups=[['Veículos',s.vehicles.filter(v=>v.kind!=='equipamento'),0],['Equipamentos',s.vehicles.filter(v=>v.kind==='equipamento'),1]].filter(g=>g[1].length).map(([name,list,eq])=>{
+  const pl=new Set(list.map(v=>v.plate)),uso=s.tires.filter(t=>t.status==='uso'&&pl.has(t.plate)),als=al.filter(a=>a.t.plate&&pl.has(a.t.plate)),sv=svcs.filter(x=>pl.has(x.plate)),fu=fuels.filter(x=>pl.has(x.plate)),
+   fv=fu.reduce((a,x)=>a+(x.value||0),0),fl=fu.reduce((a,x)=>a+(x.liters||0),0),pos=list.reduce((a,v)=>a+posOf(v).length,0),svv=sv.reduce((a,x)=>a+(x.value||0),0),word=eq?'equipamento':'veículo';
+  return {name,list,eq,cards:[
+   [eq?'Equipamentos':'Veículos',list.length,uso.length+' de '+pos+' posições com pneu','var(--accent)',null],
+   ['Pneus em uso',uso.length,brl(uso.reduce((a,t)=>a+(t.price||0),0))+' em valor de compra','var(--ok)','aplic'],
+   ['Alertas de troca',als.length,als.filter(a=>a.lv==='bad').length+' críticos','var(--bad)',null],
+   ['Gasto em serviços',svv,sv.length+(sv.length===1?' serviço':' serviços'),'var(--ok)','serv'],
+   ['Gasto em combustível',fv,fu.length+(fu.length===1?' abastecimento':' abastecimentos')+' · '+fl.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+' L','var(--warn)','fuel']]};
+ });
+ return html`${!s.tires.length&&html`<div class="mb-5 rounded-md border border-line bg-panel p-4 text-sm"><div class="font-head text-xl font-semibold mb-1">Sistema pronto para uso</div>Comece cadastrando os veículos na aba Frota e os pneus na aba Pneus. Depois, monte os eixos de cada veículo na aba Aplicação.<div class="mt-3 flex gap-2"><${Btn} p=${1} on=${()=>go('frota')}>Cadastrar veículo<//><${Btn} on=${()=>go('pneus')}>Cadastrar pneu<//></div></div>`}<div class="font-head text-2xl font-semibold mb-3">Pneus (geral)</div><div class="grid grid-cols-2 lg:grid-cols-5 gap-3">${cards.map((x,i)=>html`<div key=${x[0]} class="relative overflow-hidden rounded-md border border-line bg-panel p-4 pl-5 max-lg:last:col-span-2"><i class="absolute inset-y-0 left-0 w-1.5" style=${{background:CC[i]}}></i><div class="flex items-start justify-between"><div class="text-sm text-mute">${x[0]}</div><span style=${{color:CC[i]}}><${TireIcon} s=${26}/></span></div><div class="font-head text-6xl font-semibold leading-none mt-2">${x[1]}</div><div class="text-sm text-mute mt-2">${x[2]}</div></div>`)}</div>
+ <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">${money.map(x=>html`<button key=${x[0]} onClick=${()=>go(x[4])} class="relative overflow-hidden rounded-md border border-line bg-panel p-4 pl-5 text-left hover:border-brand"><i class="absolute inset-y-0 left-0 w-1.5" style=${{background:x[3]}}></i><div class="text-sm text-mute">${x[0]}</div><div class="font-head text-4xl font-semibold leading-none mt-2 tabular-nums">${brl(x[1])}</div><div class="text-sm text-mute mt-2">${x[2]}</div></button>`)}</div>
+ ${groups.map(g=>html`<section key=${g.name} class="mt-8 border-t border-line pt-5"><div class="font-head text-2xl font-semibold mb-3">${g.name}</div>
+  <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">${g.cards.map(x=>html`<${x[4]?'button':'div'} key=${x[0]} onClick=${x[4]?()=>go(x[4]):undefined} class=${'relative overflow-hidden rounded-md border border-line bg-panel p-4 pl-5 text-left max-lg:last:col-span-2'+(x[4]?' hover:border-brand':'')}><i class="absolute inset-y-0 left-0 w-1.5" style=${{background:x[3]}}></i><div class="text-sm text-mute">${x[0]}</div><div class=${'font-head font-semibold leading-none mt-2 tabular-nums '+(typeof x[1]==='number'&&(x[0].startsWith('Gasto'))?'text-3xl':'text-5xl')}>${x[0].startsWith('Gasto')?brl(x[1]):x[1]}</div><div class="text-sm text-mute mt-2">${x[2]}</div><//>`)}</div>
+  <${VehGrid} s=${{...s,vehicles:g.list}} al=${al} setM=${setM} eqm=${g.eq}/></section>`)}
+ <div class="mt-5 rounded-lg border border-line bg-panel p-4"><div class="font-head text-xl font-semibold mb-3">Situação dos ${s.tires.length} pneus</div>
+  <div class="flex h-3 rounded overflow-hidden bg-line">${Object.keys(ST).map(k=>html`<div key=${k} title=${ST[k]} style=${{width:c(k)/tot*100+'%',background:STV[k]}}></div>`)}</div>
+  <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">${Object.keys(ST).map(k=>html`<span key=${k} class="flex items-center gap-2"><i class="inline-block h-2.5 w-2.5 rounded-sm" style=${{background:STV[k]}}></i>${ST[k]}: ${c(k)}</span>`)}</div></div>
+ ${est.length>0&&html`<div class="mt-5 rounded-lg border border-line bg-panel p-4"><div class="font-head text-xl font-semibold mb-3">Estoque: ${est.length} ${est.length===1?'pneu':'pneus'}</div>
+  <div class="grid gap-5 sm:grid-cols-2"><div><div class="mb-1 text-sm text-mute">Por medida</div>${bySize.map(d=>html`<div key=${d.label} class="flex justify-between border-t border-line py-1 text-sm first:border-0"><span>${d.label}</span><b>${d.value}</b></div>`)}</div>
+  <div><div class="mb-1 text-sm text-mute">Por tipo</div>${[...Object.keys(CONDL).map(k=>[CONDL[k],est.filter(t=>t.cond===k).length]),['Sem tipo informado',est.filter(t=>!CONDL[t.cond]).length]].filter(x=>x[1]>0).map(x=>html`<div key=${x[0]} class="flex justify-between border-t border-line py-1 text-sm first:border-0"><span>${x[0]}</span><b>${x[1]}</b></div>`)}</div></div></div>`}
+ <div class="mt-5 grid lg:grid-cols-5 gap-5">
+  <div class="lg:col-span-3 rounded-lg border border-line bg-panel p-4"><div class="font-head text-xl font-semibold mb-2">Pneus que pedem atenção</div>
+   ${al.length?al.map((a,i)=>html`<div key=${i} class="flex items-start gap-3 py-2 border-t border-line first:border-0"><i class="mt-1.5 h-2.5 w-2.5 rounded-full shrink-0" style=${{background:a.lv==='bad'?'var(--bad)':'var(--warn)'}}></i><div class="text-sm"><b>${a.t.id}</b> ${a.t.brand} ${a.t.model}${a.t.plate?' · '+a.t.plate+', '+a.t.pos:' · em estoque'}<div class="text-mute">${a.m}</div></div></div>`):html`<p class="text-sm text-mute">Nenhum pneu perto do limite. Os alertas aparecem com sulco até 3 mm, DOT com 5 anos ou mais, ou 90% da vida útil prevista em km.</p>`}</div>
+  <div class="lg:col-span-2 rounded-lg border border-line bg-panel p-4"><div class="font-head text-xl font-semibold mb-2">Últimos registros</div>
+   ${sortH(s.history).slice(0,5).map(h=>html`<div key=${h.id} class="py-2 border-t border-line first:border-0 text-sm"><b>${h.type}</b> · ${fmtD(h.date)}<div class="text-mute">${h.plate} · ${h.reason!=='—'&&h.reason!==h.type?h.reason+' · ':''}${mv(s,h.plate,h.km)}${h.cost?' · '+brl(h.cost):''}</div></div>`)}
+   <button class="mt-2 text-sm underline" onClick=${()=>go('hist')}>Ver histórico completo</button></div></div>`}
+
+const dlOpts={type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+async function exportTiresXlsx(s,rows,sit,km){
+ await loadLib(LIB_XLSX,'ExcelJS');
+ const wb=new ExcelJS.Workbook();wb.creator='Controle de pneus';wb.created=new Date();
+ const HEAD={font:{bold:true,color:{argb:'FFFFFFFF'}},fill:{type:'pattern',pattern:'solid',fgColor:{argb:'FF1B1D20'}},alignment:{vertical:'middle',wrapText:true}};
+ const MON='"R$" #,##0.00',yr=new Date().getFullYear();
+ const D=x=>{const [y,m,d]=x.split('-').map(Number);return new Date(Date.UTC(y,m-1,d))};
+ const cols=[['Fogo',12],['Marca',16],['Modelo',18],['Medida',16],['Tipo',11],['Recapagens',12,'0'],['DOT',8],['Idade (anos)',12,'0'],['Sulco (mm)',11,'0.0'],['Status',12],['Situação',14],['Motivo da situação',48],['Veículo',12],['Posição',26],['Km na instalação',16,'#,##0'],['Km rodado',13,'#,##0'],['Vida útil (km)',14,'#,##0'],['Km restante',13,'#,##0'],['Valor de compra (R$)',18,MON],['Custo por km (R$)',16,'"R$" #,##0.000'],['Serviços (qtd)',13,'0'],['Serviços (R$)',14,MON],['Movimentações',14,'0'],['Última movimentação',20,'dd/mm/yyyy'],['Tipo da última',16]];
+ const ws=wb.addWorksheet('Pneus',{views:[{state:'frozen',xSplit:1,ySplit:1}]});
+ ws.columns=cols.map(c=>({header:c[0],width:c[1],style:c[2]?{numFmt:c[2]}:{}}));
+ [...rows].sort(byId).forEach(t=>{
+  const S=sit(t),dy=dotYear(t.dot),u=km(t);
+  const hv=sortH(s.history.filter(x=>x.tireId===t.id||x.tireOut===t.id)),lm=hv[0];
+  const sv=(s.services||[]).filter(x=>x.tireId===t.id);
+  ws.addRow([t.id,t.brand,t.model,t.size,CONDL[t.cond]||'',t.recaps||0,t.dot,dy?yr-dy:null,t.tread==null?null:+t.tread,ST[t.status]||t.status,S.l,S.why||'',t.plate||'',t.pos||'',t.status==='uso'&&t.kmIn!=null?t.kmIn:null,u,t.kmVida>0?t.kmVida:null,t.kmVida>0?Math.max(0,t.kmVida-u):null,t.price||0,u>0?(t.price||0)/u:null,sv.length,sv.reduce((a,x)=>a+(x.value||0),0),hv.length,lm?D(lm.date):null,lm?lm.type:'']);
+ });
+ ws.getRow(1).eachCell(c=>{Object.assign(c,HEAD)});ws.getRow(1).height=30;
+ if(rows.length)ws.autoFilter={from:{row:1,column:1},to:{row:1,column:cols.length}};
+ const buf=await wb.xlsx.writeBuffer();
+ return {filename:'pneus-'+fileStamp()+'.xlsx',data:new Blob([buf],dlOpts)};
+}
+async function exportFuelXlsx(s,rows,plates){
+ await loadLib(LIB_XLSX,'ExcelJS');
+ const wb=new ExcelJS.Workbook();wb.creator='Controle de pneus';wb.created=new Date();
+ const HEAD={font:{bold:true,color:{argb:'FFFFFFFF'}},fill:{type:'pattern',pattern:'solid',fgColor:{argb:'FF1B1D20'}},alignment:{vertical:'middle'}};
+ const MON='"R$" #,##0.00',D=(x)=>{const [y,m,d]=x.split('-').map(Number);return new Date(Date.UTC(y,m-1,d))};
+ const sheet=(name,cols,data)=>{const ws=wb.addWorksheet(name,{views:[{state:'frozen',ySplit:1}]});ws.columns=cols.map(c=>({header:c[0],width:c[1],style:c[2]?{numFmt:c[2]}:{}}));data.forEach(r=>ws.addRow(r));ws.getRow(1).eachCell(c=>{Object.assign(c,HEAD)});ws.getRow(1).height=22;if(data.length)ws.autoFilter={from:{row:1,column:1},to:{row:1,column:cols.length}};return ws};
+ const vm=p=>(s.vehicles.find(v=>v.plate===p)||{}).model||'';
+ const sorted=[...rows].sort((a,b)=>a.plate.localeCompare(b.plate)||a.date.localeCompare(b.date)||a.km-b.km);
+ sheet('Abastecimentos',[['Data',12,'dd/mm/yyyy'],['Veículo',12],['Modelo',20],['Km',12,'#,##0'],['Litros',11,'#,##0.00'],['Valor (R$)',14,MON],['Preço por litro (R$)',18,'"R$" #,##0.000'],['Tanque cheio',13],['Observação',34]],
+  sorted.map(x=>[D(x.date),x.plate,vm(x.plate),x.km,x.liters,x.value||0,x.value>0?x.value/x.liters:null,x.full?'Sim':'Não',x.note||'']));
+ sheet('Médias por veículo',[['Veículo',12],['Modelo',20],['Km atual',12,'#,##0'],['Abastecimentos',15],['Km rodado no período',20,'#,##0'],['Média km/dia',14,'#,##0.0'],['Média km/mês',14,'#,##0'],['Consumo médio (km/L)',20,'#,##0.00'],['Litros',11,'#,##0.0'],['Gasto (R$)',14,MON],['Preço médio/L (R$)',18,'"R$" #,##0.000'],['Último abastecimento',20,'dd/mm/yyyy']],
+  plates.map(p=>({p,r:fuelStats(s,p)})).filter(x=>x.r.n).map(({p,r})=>[p,vm(p),(s.vehicles.find(v=>v.plate===p)||{}).km||0,r.n,r.dist,r.perDay,r.perMonth,r.kmL,r.liters,r.value,r.priceL,D(r.last.date)]));
+ const buf=await wb.xlsx.writeBuffer();
+ return {filename:'abastecimentos-'+fileStamp()+'.xlsx',data:new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})};
+}
+
+const fuelCheck=(recs,s)=>{
+ const num=v=>{const t=String(v).trim();return +(t.includes(',')?t.replace(/\./g,'').replace(',','.'):t)};
+ const seen=new Set((s.fuel||[]).map(x=>[x.plate,x.date,x.km,Number(x.liters).toFixed(2)].join('|')));
+ return recs.map((r,i)=>{
+  const er=[];const plate=r.plate.toUpperCase();let dt=r.dt;
+  const mm=/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(dt);if(mm)dt=mm[3]+'-'+mm[2].padStart(2,'0')+'-'+mm[1].padStart(2,'0');
+  const km=/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(r.km)?r.km.replace(/\./g,'').replace(',','.'):r.km;const lit=r.lit,val=r.val,fl=r.fl.toLowerCase(),note=r.note.toUpperCase();
+  if(!plate)er.push('falta o veículo (placa)');else if(!s.vehicles.some(v=>v.plate.toUpperCase()===plate))er.push('veículo '+plate+' não está cadastrado na Frota');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(dt)||isNaN(new Date(dt)))er.push('data inválida (use uma data do Excel ou DD/MM/AAAA)');
+  if(km===''||!(num(km)>=0))er.push('km ausente ou inválido');
+  if(lit===''||!(num(lit)>0))er.push('litros ausentes ou inválidos');
+  if(val!==''&&!(num(val)>=0))er.push('valor inválido');
+  const full=fl===''?true:/^(sim|s|true|1|yes)$/.test(fl)?true:/^(nao|não|n|false|0|no)$/.test(fl)?false:null;if(full===null)er.push('tanque cheio inválido (use Sim ou Não)');
+  let d=null;
+  if(!er.length){const real=s.vehicles.find(v=>v.plate.toUpperCase()===plate).plate;const key=[real,dt,num(km),num(lit).toFixed(2)].join('|');if(seen.has(key))er.push('abastecimento já cadastrado ou repetido (mesmo veículo, data, km e litros)');else{seen.add(key);d={plate:real,date:dt,km:num(km),liters:num(lit),value:val===''?0:num(val),full,note}}}
+  return{n:i+1,id:plate,errs:er,d}})};
+const xNorm=v=>String(v==null?'':v).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
+const xCell=v=>{if(v==null)return'';if(v instanceof Date)return isNaN(v)?'':v.toISOString().slice(0,10);if(typeof v==='number')return String(v);if(typeof v==='boolean')return v?'sim':'nao';if(typeof v==='string')return v.trim();if(v.result!=null)return xCell(v.result);if(v.richText)return v.richText.map(t=>t.text).join('').trim();if(v.text!=null)return String(v.text).trim();return''};
+async function parseFuelXlsx(buf,s){
+ await loadLib(LIB_XLSX,'ExcelJS');
+ const wb=new ExcelJS.Workbook();
+ try{await wb.xlsx.load(buf)}catch(e){return{fatal:'Não foi possível ler o arquivo. Envie uma planilha Excel (.xlsx).'}}
+ const ws=wb.getWorksheet('Abastecimentos')||wb.worksheets[0];
+ if(!ws)return{fatal:'A planilha está vazia.'};
+ const col={};ws.getRow(1).eachCell((c,i)=>{col[xNorm(xCell(c.value))]=i});
+ const pick=(...names)=>{for(const n of names)if(col[n])return col[n];return 0};
+ const C={plate:pick('veiculo','placa'),dt:pick('data'),km:pick('km'),lit:pick('litros'),val:pick('valorr','valor'),fl:pick('tanquecheio'),note:pick('observacao')};
+ const miss=[['veiculo',C.plate,'Veículo'],['data',C.dt,'Data'],['km',C.km,'Km'],['litros',C.lit,'Litros']].filter(x=>!x[1]).map(x=>x[2]);
+ if(miss.length)return{fatal:'Não encontrei as colunas obrigatórias na primeira linha: '+miss.join(', ')+'. Use o modelo (.xlsx) ou o arquivo exportado desta aba.'};
+ const get=(row,c)=>c?row.getCell(c).value:null;
+ const recs=[];
+ for(let r=2;r<=ws.rowCount;r++){const row=ws.getRow(r);
+  let dv=get(row,C.dt);if(typeof dv==='number'&&dv>20000&&dv<80000)dv=new Date(Date.UTC(1899,11,30)+Math.round(dv)*864e5);
+  const rec={plate:xCell(get(row,C.plate)),dt:xCell(dv),km:xCell(get(row,C.km)),lit:xCell(get(row,C.lit)),val:xCell(get(row,C.val)),fl:xCell(get(row,C.fl)),note:xCell(get(row,C.note))};
+  if(!rec.plate&&!rec.dt&&!rec.km&&!rec.lit&&!rec.val)continue;
+  recs.push({...rec,row:r})}
+ if(!recs.length)return{fatal:'Nenhum abastecimento encontrado na planilha (a partir da linha 2).'};
+ const items=fuelCheck(recs,s);items.forEach((it,i)=>{it.n=recs[i].row});
+ return{items};
+}
+async function fuelTemplate(s){
+ await loadLib(LIB_XLSX,'ExcelJS');
+ const wb=new ExcelJS.Workbook();wb.creator='Controle de pneus';
+ const HEAD={font:{bold:true,color:{argb:'FFFFFFFF'}},fill:{type:'pattern',pattern:'solid',fgColor:{argb:'FF1B1D20'}}};
+ const ws=wb.addWorksheet('Abastecimentos',{views:[{state:'frozen',ySplit:1}]});
+ ws.columns=[['Data',13,'dd/mm/yyyy'],['Veículo',13],['Km',12,'#,##0'],['Litros',11,'#,##0.00'],['Valor (R$)',14,'"R$" #,##0.00'],['Tanque cheio',14],['Observação',34]].map(c=>({header:c[0],width:c[1],style:c[2]?{numFmt:c[2]}:{}}));
+ ws.getRow(1).eachCell(c=>Object.assign(c,HEAD));
+ const v=s.vehicles[0];ws.addRow([new Date(Date.UTC(2026,10,1)),v?v.plate:'ABC-1D23',125000,180.5,1083,'Sim','Exemplo: apague esta linha']);
+ const wi=wb.addWorksheet('Instruções');wi.columns=[{width:100}];
+ ['Preencha uma linha por abastecimento na aba Abastecimentos e apague a linha de exemplo.','Obrigatórios: Data, Veículo (placa já cadastrada na Frota), Km e Litros.','Opcionais: Valor (R$), Tanque cheio (Sim ou Não, padrão Sim) e Observação.','O km do veículo é atualizado se o km informado for maior que o atual.'].forEach(t=>wi.addRow([t]));
+ const buf=await wb.xlsx.writeBuffer();
+ return{filename:'modelo-abastecimentos.xlsx',data:new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})};
+}
+function ImportFuel({s,mut,close}){
+ const [res,setRes]=useState(null);const [done,setDone]=useState(0);const [msg,setMsg]=useState('');const [busy,setBusy]=useState(false);const [dl,setDl]=useState(null);const [name,setName]=useState('');
+ useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
+ const pick=async e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;setDone(0);setMsg('');setRes(null);setName(f.name);setBusy(true);
+  try{setRes(await parseFuelXlsx(await f.arrayBuffer(),s))}catch(x){setMsg('Não foi possível ler o arquivo. Confira se é uma planilha Excel (.xlsx).')}setBusy(false)};
+ const model=async()=>{try{await dl.save(await fuelTemplate(s));setMsg('Modelo salvo.')}catch(e){setMsg(e&&e.code==='declined'?'Download cancelado.':'Não foi possível gerar o modelo agora.')}};
+ const ok=res&&res.items?res.items.filter(i=>i.d):[];const bad=res&&res.items?res.items.filter(i=>!i.d):[];
+ const go=()=>{const list=ok.map(i=>i.d);mut(n=>{list.forEach(d=>{const k=[d.plate,d.date,d.km,Number(d.liters).toFixed(2)].join('|');if(n.fuel.some(x=>[x.plate,x.date,x.km,Number(x.liters).toFixed(2)].join('|')===k))return;n.fuel.push({...d,id:Math.max(0,...n.fuel.map(x=>x.id||0))+1});bump(n,d.plate,d.km)});applyFuelPrices(n)});setDone(list.length);setRes(null);setName('')};
+ return html`<div class="text-sm">
+  <p class="text-mute">Envie uma planilha Excel <b>.xlsx</b> com uma linha por abastecimento. Colunas: <b>Data, Veículo, Km, Litros</b> (obrigatórias) e Valor (R$), Tanque cheio (Sim ou Não) e Observação (opcionais). O veículo precisa estar cadastrado na Frota. O km do veículo é atualizado se o km importado for maior. O arquivo exportado desta aba pode ser importado de volta.</p>
+  <div class="mt-3 flex flex-wrap gap-2 items-center"><label class="cursor-pointer rounded-md bg-accent px-4 py-2 font-medium text-onaccent">${busy?'Lendo…':'Escolher planilha (.xlsx)'}<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="sr-only" onChange=${pick}/></label>${dl&&html`<${Btn} on=${model}>Baixar modelo (.xlsx)<//>`}${name&&html`<span class="text-mute">${name}</span>`}</div>
+  ${msg&&html`<p class="mt-2 text-mute" role="status">${msg}</p>`}
+  ${done>0&&html`<p class="mt-3 font-medium text-ok" role="status">${done} ${done===1?'abastecimento importado':'abastecimentos importados'} com sucesso. Km dos veículos e médias atualizados.</p>`}
+  ${res&&res.fatal&&html`<p class="mt-3 text-bad" role="alert">${res.fatal}</p>`}
+  ${res&&res.items&&html`<div class="mt-3 rounded-md border border-line p-3"><p><b>${ok.length}</b> ${ok.length===1?'abastecimento pronto':'abastecimentos prontos'} para importar${bad.length?html` · <b class="text-bad">${bad.length}</b> com problema (não serão importados)`:''}.</p>
+   ${bad.length>0&&html`<ul class="mt-2 max-h-40 overflow-auto space-y-1 text-xs text-bad">${bad.slice(0,100).map(i=>html`<li key=${i.n}>Linha ${i.n}${i.id?' ('+i.id+')':''}: ${i.errs.join('; ')}</li>`)}</ul>`}</div>`}
+  <div class="mt-5 flex justify-end gap-2"><${Btn} on=${close}>${done?'Fechar':'Cancelar'}<//>${ok.length>0&&html`<${Btn} p=${1} on=${go}>Importar ${ok.length} ${ok.length===1?'abastecimento':'abastecimentos'}<//>`}</div></div>`}
+
+function Tires({s,mut,setM}){
+ const [q,setQ]=useState('');const [fl,setFl]=useState('');const [del,setDel]=useState('');const [cf,setCf]=useState('');const [mf,setMf]=useState('');const [sf,setSf]=useState('');const [dl,setDl]=useState(null);const [busy,setBusy]=useState(false);const [msg,setMsg]=useState('');
+ useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
+ const al=alertsOf(s);
+ const sit=t=>{const a=al.filter(x=>x.t.id===t.id);const lv=a.some(x=>x.lv==='bad')?'bad':a.length?'warn':'ok';const why=a.map(x=>x.m).join(' | ');
+  if(t.status==='sucata')return{k:'desc',l:'Descartado',c:'var(--mute)',why:'Pneu sucateado'};
+  if(t.status==='recapagem')return{k:'rec',l:'Em recapagem',c:'var(--mute)',why:a.length?why:'Aguardando retorno da recapagem'};
+  if(lv==='bad')return{k:'bad',l:'Crítico',c:'var(--bad)',why};
+  if(lv==='warn')return{k:'warn',l:'Atenção',c:'var(--warn)',why};
+  return{k:'ok',l:t.status==='uso'?'Normal':'Disponível',c:'var(--ok)',why:t.status==='uso'?'Sem alertas':'Em estoque, sem alertas'}};
+ const yrNow=new Date().getFullYear();
+ const rows=[...s.tires].sort(byId).filter(t=>(!fl||t.status===fl)&&(!cf||t.cond===cf)&&(!mf||t.size===mf)&&(!sf||sit(t).k===sf)&&(t.id+t.brand+t.model+t.size+(t.plate||'')).toLowerCase().includes(q.toLowerCase()));
+ const km=t=>(t.kmRodado||0)+(t.status==='uso'?Math.max(0,vkm(s,t.plate)-t.kmIn):0);
+ return html`<div class="flex flex-wrap gap-2 items-end mb-4">
+  <div class="grow sm:grow-0 sm:w-64"><${Inp} v=${q} on=${e=>setQ(e.target.value)} ph="Buscar fogo, marca, medida ou placa"/></div>
+  <div class="w-40"><${Sel} v=${fl} on=${e=>setFl(e.target.value)} opts=${[['','Todos os status'],...Object.keys(ST).map(k=>[k,ST[k]])]}/></div>
+  <div class="w-40"><${Sel} v=${cf} on=${e=>setCf(e.target.value)} opts=${[['','Todos os tipos'],...Object.keys(CONDL).map(k=>[k,CONDL[k]])]}/></div>
+  <div class="w-44"><${Sel} v=${mf} on=${e=>setMf(e.target.value)} opts=${[['','Todas as medidas'],...[...new Set(s.tires.map(t=>t.size))].sort().map(z=>[z,z])]}/></div>
+  <div class="w-44"><${Sel} v=${sf} on=${e=>setSf(e.target.value)} opts=${[['','Todas as situações'],['ok','Normal / Disponível'],['warn','Atenção'],['bad','Crítico'],['rec','Em recapagem'],['desc','Descartado']]}/></div>
+  <div class="sm:ml-auto flex gap-2">${dl&&html`<${Btn} on=${async()=>{if(busy)return;setBusy(true);setMsg('');try{const f=await exportTiresXlsx(s,rows,sit,km);await dl.save(f);setMsg('Excel salvo.')}catch(e){setMsg(e&&e.code==='declined'?'Download cancelado.':'Não foi possível gerar o Excel agora. Tente de novo.')}setBusy(false)}}>${busy?'Gerando…':'Exportar Excel (.xlsx)'}<//>`}<${Btn} on=${()=>setM({k:'importxml'})}>Importar Excel (.xlsx)<//><${Btn} p=${1} on=${()=>setM({k:'tire'})}>Cadastrar pneu<//></div></div>
+ ${msg&&html`<p class="-mt-2 mb-3 text-sm text-mute" role="status">${msg}</p>`}
+ <div class="overflow-x-auto rounded-lg border border-line bg-panel"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Fogo','Marca','Modelo','Medida','Tipo','Recapagens','DOT','Idade','Sulco','Status','Situação','Veículo','Posição','Km na instalação','Km rodado','Vida útil (km)','Km restante','Compra','Custo por km','Serviços','Movimentações','Última movimentação',''].map(h=>html`<th key=${h} class="font-medium px-3 py-2">${h}</th>`)}</tr></thead><tbody>
+  ${rows.map(t=>{const S=sit(t);const dy=dotYear(t.dot);const idade=dy?yrNow-dy:null;const u=km(t);const hv=sortH(s.history.filter(x=>x.tireId===t.id||x.tireOut===t.id));const lm=hv[0];const sv=(s.services||[]).filter(x=>x.tireId===t.id);const svT=sv.reduce((a,x)=>a+(x.value||0),0);return html`<tr key=${t.id} class="border-t border-line"><td class="px-3 py-2 font-semibold"><span class="inline-flex items-center gap-2"><span style=${{color:t.status==='sucata'?'var(--bad)':t.tread!=null&&t.tread<=1.6?'var(--bad)':t.tread!=null&&t.tread<=3?'var(--warn)':t.status==='uso'?'#D49A00':'var(--mute)'}}><${TireIcon} s=${18}/></span>${t.id}</span></td><td class="px-3 py-2">${t.brand}</td><td class="px-3 py-2">${t.model}</td><td class="px-3 py-2">${t.size}</td><td class="px-3 py-2">${CONDL[t.cond]||'—'}</td><td class="px-3 py-2 tabular-nums">${t.recaps||0}</td><td class="px-3 py-2">${t.dot}</td><td class="px-3 py-2 tabular-nums" style=${{color:idade!=null&&idade>=5?'var(--warn)':''}}>${idade==null?'—':idade+(idade===1?' ano':' anos')}</td><td class="px-3 py-2"><${Tread} mm=${t.tread}/></td><td class="px-3 py-2"><${Badge} st=${t.status}/></td><td class="px-3 py-2" title=${S.why}><span class="inline-flex items-center gap-1.5 font-medium"><span aria-hidden="true" style=${{width:'9px',height:'9px',borderRadius:'50%',background:S.c,display:'inline-block'}}></span>${S.l}</span>${S.k!=='ok'&&S.k!=='desc'&&S.why&&html`<div class="max-w-[220px] truncate text-xs text-mute">${S.why}</div>`}</td><td class="px-3 py-2">${t.plate||'—'}</td><td class="px-3 py-2">${t.pos||'—'}</td><td class="px-3 py-2 tabular-nums">${t.status==='uso'&&t.kmIn!=null?N(t.kmIn):'—'}</td><td class="px-3 py-2 tabular-nums">${N(u)}</td><td class="px-3 py-2 tabular-nums">${t.kmVida>0?N(t.kmVida):'—'}${t.kmVida>0&&html`<div class="mt-1 h-1.5 w-16 overflow-hidden rounded-sm bg-line"><div style=${{width:Math.min(100,u/t.kmVida*100)+'%',height:'100%',background:u>=t.kmVida?'var(--bad)':u>=t.kmVida*0.9?'var(--warn)':'var(--ok)'}}></div></div>`}</td><td class="px-3 py-2 tabular-nums" style=${{color:t.kmVida>0&&u>=t.kmVida?'var(--bad)':''}}>${t.kmVida>0?(u>=t.kmVida?'Vencido':N(t.kmVida-u)):'—'}</td><td class="px-3 py-2 tabular-nums">${brl(t.price)}</td><td class="px-3 py-2 tabular-nums">${u>0?'R$ '+(t.price/u).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3}):'—'}</td><td class="px-3 py-2 tabular-nums">${sv.length?sv.length+' · '+brl(svT):'—'}</td><td class="px-3 py-2 tabular-nums">${hv.length}</td><td class="px-3 py-2">${lm?fmtD(lm.date)+' · '+lm.type:'—'}</td>
+   <td class="px-3 py-2 text-right"><span class="inline-flex gap-2"><${Btn} sm=${1} on=${()=>setM({k:'thist',t})}>Histórico<//><${Btn} sm=${1} on=${()=>setM({k:'tire',t})}>Editar<//>${t.status!=='uso'&&(del===t.id?html`<${Btn} sm=${1} on=${()=>{mut(n=>{n.tires=n.tires.filter(x=>x.id!==t.id)});setDel('')}}>Confirmar exclusão<//>`:html`<${Btn} sm=${1} on=${()=>setDel(t.id)}>Excluir<//>`)}</span></td></tr>`})}
+  </tbody></table>${!rows.length&&html`<p class="p-4 text-sm text-mute">Nenhum pneu encontrado. Ajuste a busca ou cadastre um novo pneu.</p>`}</div>`}
+
+function Fleet({s,setM}){
+ const [plate,setP]=useState(s.vehicles[0]?s.vehicles[0].plate:'');
+ const v=s.vehicles.find(x=>x.plate===plate)||s.vehicles[0];
+ return html`<div class="flex flex-wrap gap-2 mb-4">${s.vehicles.map(x=>html`<button key=${x.plate} onClick=${()=>setP(x.plate)} class=${'rounded-md px-4 py-2 font-medium '+(v&&v.plate===x.plate?'bg-brand text-onbrand':'border border-line')} title=${x.kind==='equipamento'?'Equipamento (horímetro)':'Veículo (km)'}>${x.plate}${x.kind==='equipamento'&&html` <span class="text-xs font-normal opacity-70">EQ</span>`}</button>`)}<${Btn} on=${()=>setM({k:'vehicle'})}>Novo veículo<//><${Btn} on=${()=>setM({k:'vehicle',kind:'equipamento'})}>Novo equipamento<//>
+  <div class="sm:ml-auto flex gap-2"><${Btn} p=${1} on=${()=>setM({k:'install',plate:v&&v.plate})}>Instalar pneu<//><${Btn} on=${()=>setM({k:'remove'})}>Retirar pneu<//></div></div>
+ ${v&&html`<div class="mb-4"><span class="font-head text-3xl font-semibold">${v.plate}</span> <span class="text-mute">${v.model} · ${v.kind==='equipamento'?'Equipamento · horímetro ':''}${mv(s,v.plate,v.km)}</span></div>
+ <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${posOf(v).map(({key:p})=>{const t=s.tires.find(x=>x.status==='uso'&&x.plate===v.plate&&x.pos===p);
+  return html`<div key=${p} class=${'rounded-lg p-4 bg-panel '+(t?'border border-line':'border border-dashed border-line')}><div class="font-head text-lg font-semibold">${p}</div>
+  ${t?html`<div class="mt-1 text-sm">${t.id} · ${t.brand} ${t.model}</div><div class="mt-2"><${Tread} mm=${t.tread}/></div><div class="mt-1 text-xs text-mute">Instalado com ${mv(s,v.plate,t.kmIn)} · rodou ${mv(s,v.plate,Math.max(0,v.km-t.kmIn))}${t.kmVida>0?' · total '+N(kmTire(s,t))+' de '+mv(s,v.plate,t.kmVida):''}</div>
+   <div class="mt-3 flex flex-wrap gap-2"><${Btn} sm=${1} on=${()=>setM({k:'swap',tire:t.id})}>Trocar<//><${Btn} sm=${1} on=${()=>setM({k:'rotate',tire:t.id})}>Rodízio<//><${Btn} sm=${1} on=${()=>setM({k:'remove',tire:t.id})}>Retirar<//><${Btn} sm=${1} on=${()=>setM({k:'editinst',tire:t.id})}>Corrigir<//></div>`
+  :html`<div class="mt-2 text-sm text-mute">Posição vazia</div><div class="mt-3"><${Btn} sm=${1} on=${()=>setM({k:'install',plate:v.plate,pos:p})}>Instalar pneu<//></div>`}</div>`})}</div>`}`}
+
+function Aplicacao({s,mut,setM,initPlate}){
+ const [plate,setP]=useState(initPlate||(s.vehicles[0]?s.vehicles[0].plate:''));
+ const v=s.vehicles.find(x=>x.plate===plate)||s.vehicles[0];
+ const [f,u,setF]=useF({name:'',type:'dir',dual:'0'});const [err,setE]=useState('');
+ if(!v)return html`<p class="text-sm text-mute">Cadastre um veículo na aba Frota para configurar os eixos.</p>`;
+ const tireAt=key=>s.tires.find(t=>t.status==='uso'&&t.plate===v.plate&&t.pos===key);
+ const add=()=>{const nm=f.name.trim();
+  if(!nm)return setE('Dê um nome ao eixo (ex.: Eixo 3).');
+  if(v.axles.some(a=>a.name.toLowerCase()===nm.toLowerCase()))return setE('Já existe um eixo com esse nome neste veículo.');
+  mut(n=>{n.vehicles.find(x=>x.plate===v.plate).axles.push({id:'a'+Date.now(),name:nm,type:f.type,dual:f.type!=='est'&&f.dual==='1'})});setF({name:'',type:'dir',dual:'0'});setE('')};
+ const rm=a=>{if(posOf({axles:[a]}).some(p=>tireAt(p.key)))return setE('Retire os pneus do '+a.name+' antes de excluir o eixo.');
+  mut(n=>{const x=n.vehicles.find(y=>y.plate===v.plate);x.axles=x.axles.filter(z=>z.id!==a.id)});setE('')};
+ const moveAx=(i,d)=>mut(n=>{const x=n.vehicles.find(y=>y.plate===v.plate).axles,j=i+d;if(j<0||j>=x.length)return;[x[i],x[j]]=[x[j],x[i]]});
+ const all=posOf(v),filled=all.filter(p=>tireAt(p.key)).length;
+ const body=v.axles.filter(a=>a.type!=='est'),spare=v.axles.filter(a=>a.type==='est');
+ const wheel=p=>{const t=tireAt(p.key);
+  const bc=t?(t.tread==null?'#8A6A00':t.tread<=1.6?'var(--bad)':t.tread<=3?'#C2410C':'#8A6A00'):'var(--mute)';
+  const lbl=p.key+(t?' · '+t.id+', clique para substituir':' · vazio, clique para instalar');
+  return html`<div key=${p.key} class="relative shrink-0"><button type="button" title=${lbl} aria-label=${lbl} onClick=${()=>setM(t?{k:'swap',tire:t.id}:{k:'install',plate:v.plate,pos:p.key})}
+   class=${'tire flex h-24 w-14 flex-col items-center justify-center gap-1 '+(t?'':'tire-empty')} style=${{borderColor:bc}}>
+   ${t?html`<span class="max-w-full truncate rounded bg-white px-1 text-[11px] font-semibold leading-tight text-[#16181B]">${t.id}</span><span class="rounded bg-white px-1 text-[10px] font-semibold leading-tight tabular-nums text-[#16181B]">${t.tread==null?'—':Number(t.tread).toFixed(1)+' mm'}</span>`:html`<span class="rounded bg-panel px-1.5 text-lg leading-tight text-mute">+</span><span class="rounded bg-panel px-1 text-[10px] text-mute">vazio</span>`}</button>${t&&html`<button type="button" class="absolute -right-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full border border-line bg-panel text-xs text-ink" title="Corrigir instalação" aria-label=${'Corrigir instalação de '+t.id} onClick=${()=>setM({k:'editinst',tire:t.id})}>✎</button>`}</div>`};
+ return html`<div class="flex flex-wrap gap-2 mb-4">${s.vehicles.map(x=>html`<button key=${x.plate} onClick=${()=>{setP(x.plate);setE('')}} class=${'rounded-md px-4 py-2 font-medium '+(v.plate===x.plate?'bg-brand text-onbrand':'border border-line')}>${x.plate}</button>`)}</div>
+ <div class="mb-1"><span class="font-head text-3xl font-semibold">${v.plate}</span> <span class="text-mute">${v.model} · ${mv(s,v.plate,v.km)} · ${filled} de ${all.length} posições com pneu</span></div>
+ <p class="text-sm text-mute mb-4">Clique em um pneu para substituí-lo. Clique no ✎ do pneu para corrigir a instalação. Clique em uma posição vazia para instalar. Contorno amarelo: sulco até 3 mm. Contorno vermelho: até 1,6 mm.</p>
+ <div class="grid lg:grid-cols-5 gap-5">
+  <div class="lg:col-span-3 rounded-lg border border-line bg-panel p-4"><div class="max-w-md mx-auto">
+   <div class="flex justify-between text-xs text-mute px-1 mb-1"><span>Esquerdo</span><span>Direito</span></div>
+   <div class="relative"><div class="absolute inset-y-0 left-1/2 w-3 -translate-x-1/2 rounded bg-line"></div>
+    <div class="relative mx-auto mb-5 w-40 rounded-t-3xl rounded-b-md border border-line bg-bg py-2 text-center text-sm text-mute">Frente</div>
+    ${body.map(a=>{const ps=posOf({axles:[a]}),h=Math.floor(ps.length/2);
+     return html`<div key=${a.id} class="relative mb-5"><div class="text-center text-xs text-mute mb-1"><span class="rounded bg-panel px-2">${a.name} · ${AXT[a.type]}</span></div>
+      <div class="flex items-center justify-center gap-1">${ps.slice(0,h).map(p=>wheel(p))}<div class="h-2.5 flex-1 min-w-4 rounded" style=${{background:'var(--mute)'}}></div>${ps.slice(h).map(p=>wheel(p))}</div></div>`})}
+   </div>
+   ${!body.length&&html`<p class="text-sm text-mute text-center py-6">Nenhum eixo cadastrado. Monte o veículo no formulário ao lado.</p>`}
+   ${spare.map(a=>html`<div key=${a.id} class="mt-2 pt-3 border-t border-line flex flex-col items-center"><div class="text-xs text-mute mb-1">${a.name}</div>${posOf({axles:[a]}).map(p=>wheel(p))}</div>`)}
+  </div></div>
+  <div class="lg:col-span-2 grid gap-5 self-start">
+   <div class="rounded-lg border border-line bg-panel p-4"><div class="font-head text-xl font-semibold mb-2">Eixos de ${v.plate}</div>
+    ${v.axles.map((a,i)=>html`<div key=${a.id} class="flex items-center justify-between gap-2 py-2 border-t border-line first:border-0"><div class="text-sm"><b>${a.name}</b><div class="text-mute">${AXT[a.type]}${a.type!=='est'?' · rodagem '+(a.dual?'dupla':'simples'):''}</div></div>
+     <div class="flex gap-1"><${Btn} sm=${1} on=${()=>moveAx(i,-1)}>↑<//><${Btn} sm=${1} on=${()=>moveAx(i,1)}>↓<//><${Btn} sm=${1} on=${()=>rm(a)}>Excluir<//></div></div>`)}
+    ${!v.axles.length&&html`<p class="text-sm text-mute">Sem eixos.</p>`}</div>
+   <div class="rounded-lg border border-line bg-panel p-4"><div class="font-head text-xl font-semibold mb-3">Cadastrar eixo</div><div class="grid gap-3">
+    <${Fld} l="Nome do eixo"><${Inp} v=${f.name} on=${u('name')} ph="Eixo 3"/><//>
+    <${Fld} l="Tipo"><${Sel} v=${f.type} on=${u('type')} opts=${Object.keys(AXT).map(k=>[k,AXT[k]])}/><//>
+    <${Fld} l="Rodagem"><${Sel} v=${f.type==='est'?'0':f.dual} on=${u('dual')} dis=${f.type==='est'} opts=${[['0','Simples (1 pneu por lado)'],['1','Dupla (2 pneus por lado)']]}/><//></div>
+    ${err&&html`<p class="mt-3 text-sm text-bad" role="alert">${err}</p>`}<div class="mt-4"><${Btn} p=${1} on=${add}>Cadastrar eixo<//></div></div>
+  </div></div>`}
+
+const sortH=a=>[...a].sort((x,y)=>y.date.localeCompare(x.date)||String(y.id).localeCompare(String(x.id)));
+function PastForm({s,mut,close,tire,setM}){
+ const [f,u,setF]=useF({date:'',type:'Instalação',tireId:tire||'',tireOut:'',plate:s.vehicles[0]?s.vehicles[0].plate:'',pos:'',reason:'Desgaste',km:'',cost:'0',unit:'',note:''});
+ const [err,setE]=useState('');
+ const two=f.type==='Troca'||f.type==='Rodízio';
+ const sub=()=>{const id=f.tireId.trim(),pl=f.plate.trim().toUpperCase();
+  if(!f.date)return setE('Informe a data do evento.');
+  if(f.date>today())return setE('A data de um registro anterior não pode ser futura.');
+  if(!id)return setE('Informe o número de fogo do pneu.');
+  if(!pl)return setE('Informe a placa do veículo.');
+  if(f.km===''||+f.km<0)return setE(mt(s,f.plate).eq?'Informe o horímetro no dia do evento.':'Informe a km do veículo no dia do evento.');
+  if(f.cost===''||+f.cost<0)return setE('Informe o custo (use 0 se não houve).');
+  if(f.unit!==''&&+f.unit<0)return setE('O valor unitário do pneu não pode ser negativo.');
+  mut(n=>{n.history.push({id:Date.now()+Math.random(),past:true,unit:f.unit!==''?+f.unit:((n.tires.find(x=>x.id===id)||{}).price??null),date:f.date,type:f.type,reason:f.type==='Instalação'?'—':f.reason,tireId:id,tireOut:two&&f.tireOut.trim()?f.tireOut.trim():null,plate:pl,pos:f.pos.trim()||'—',km:+f.km,cost:+f.cost,note:f.note.trim()})});close()};
+ const ids=s.tires.map(t=>t.id);
+ return html`<p class="mb-3 rounded-md border border-line bg-bg p-3 text-sm text-mute">Este registro entra só no histórico. Status, sulco, posição e km atuais dos pneus e dos veículos não mudam. O pneu e a placa podem ser de itens que não estão mais cadastrados.</p>
+ <datalist id="dl-ids">${ids.map(i=>html`<option key=${i} value=${i}/>`)}</datalist>
+ <datalist id="dl-pl">${s.vehicles.map(v=>html`<option key=${v.plate} value=${v.plate}/>`)}</datalist>
+ <datalist id="dl-pos">${posList(s,f.plate.trim().toUpperCase()).map(p=>html`<option key=${p[0]} value=${p[0]}/>`)}</datalist>
+ <div class="grid grid-cols-2 gap-3">
+  <${Fld} l="Data do evento"><${Inp} type="date" v=${f.date} on=${u('date')}/><//>
+  <${Fld} l="Tipo"><${Sel} v=${f.type} on=${u('type')} opts=${['Instalação','Retirada','Troca','Rodízio','Recapagem','Outro'].map(x=>[x,x])}/><//>
+  <${Fld} l=${f.type==='Troca'?'Pneu que entrou':'Número de fogo'}><input class=${IN} list="dl-ids" value=${f.tireId} onChange=${u('tireId')} placeholder="F-0098"/><//>
+  ${two?html`<${Fld} l=${f.type==='Troca'?'Pneu que saiu (opcional)':'Outro pneu (opcional)'}><input class=${IN} list="dl-ids" value=${f.tireOut} onChange=${u('tireOut')}/><//>`:html`<${Fld} l="Motivo"><${Sel} v=${f.reason} on=${u('reason')} dis=${f.type==='Instalação'} opts=${['Desgaste','Furo','Dano','Rodízio','Outro'].map(x=>[x,x])}/><//>`}
+  <${Fld} l="Placa"><input class=${IN} list="dl-pl" value=${f.plate} onChange=${u('plate')}/><//>
+  <${Fld} l="Posição (opcional)"><input class=${IN} list="dl-pos" value=${f.pos} onChange=${u('pos')} placeholder="Eixo 2 · Esquerdo Externo"/><//>
+  ${two&&html`<${Fld} l="Motivo"><${Sel} v=${f.reason} on=${u('reason')} opts=${['Desgaste','Furo','Dano','Rodízio','Outro'].map(x=>[x,x])}/><//>`}
+  <${Fld} l=${mt(s,f.plate).eq?"Horímetro do equipamento (h)":"Km do veículo"}><${Inp} type="number" v=${f.km} on=${u('km')}/><//>
+  <${Fld} l="Custo (R$)"><${Inp} type="number" step="0.01" v=${f.cost} on=${u('cost')}/><//>
+ </div>
+ <div class="mt-3 grid grid-cols-2 gap-3"><${Fld} l="Valor unitário do pneu (R$, opcional)"><${Inp} type="number" step="0.01" v=${f.unit} on=${u('unit')}/><//><${Fld} l="Observação (opcional)"><${Inp} v=${f.note} on=${u('note')}/><//></div>
+ <${Foot} err=${err} close=${close} ok=${sub} label="Salvar registro anterior"/>`}
+
+function TireHist({s,t,setM,close}){
+ const rows=sortH(s.history.filter(h=>h.tireId===t.id||h.tireOut===t.id));
+ return html`<div class="text-sm text-mute mb-3">${t.brand} ${t.model} · ${t.size}</div>
+ ${rows.length?rows.map(h=>html`<div key=${h.id} class="py-2 border-t border-line first:border-0 text-sm"><b>${h.type}</b> · ${fmtD(h.date)}${h.past&&html` <span class="ml-1 rounded border border-line px-1.5 text-xs text-mute">Retroativo</span>`}
+  <div class="text-mute">${h.plate} · ${h.pos||'—'} · ${mv(s,h.plate,h.km)}${unitOf(s,h)!=null?' · unitário '+brl(unitOf(s,h)):''}${h.cost?' · custo '+brl(h.cost):''}${h.reason&&h.reason!=='—'&&h.reason!==h.type?' · '+h.reason:''}</div>${h.note&&html`<div class="text-mute">${h.note}</div>`}</div>`):html`<p class="text-sm text-mute">Este pneu ainda não tem registros.</p>`}
+ <div class="mt-5 flex justify-end gap-2"><${Btn} on=${close}>Fechar<//><${Btn} p=${1} on=${()=>setM({k:'past',tire:t.id})}>Adicionar registro anterior<//></div>`}
+
+function History({s,mut,setM}){
+ const [ty,setT]=useState('');const [pl,setP]=useState('');const [tr,setR]=useState('');const [del,setDel]=useState('');
+ const ids=[...new Set(s.history.flatMap(h=>[h.tireId,h.tireOut]).filter(Boolean))].sort();
+ const rows=sortH(s.history.filter(h=>(!ty||h.type===ty)&&(!pl||h.plate===pl)&&(!tr||h.tireId===tr||h.tireOut===tr)));
+ const who=h=>h.type==='Troca'?h.tireId+' entra'+(h.tireOut?' · '+h.tireOut+' sai':''):h.type==='Rodízio'?h.tireId+(h.tireOut?' ⇄ '+h.tireOut:''):h.tireId;
+ const plates=[...new Set([...s.vehicles.map(x=>x.plate),...s.history.map(h=>h.plate)])];
+ return html`<div class="flex flex-wrap gap-2 items-end mb-4">
+  <div class="w-40"><${Sel} v=${ty} on=${e=>setT(e.target.value)} opts=${[['','Todos os tipos'],...['Troca','Rodízio','Instalação','Retirada','Recapagem','Outro'].map(x=>[x,x])]}/></div>
+  <div class="w-40"><${Sel} v=${pl} on=${e=>setP(e.target.value)} opts=${[['','Todas as placas'],...plates.map(x=>[x,x])]}/></div>
+  <div class="w-40"><${Sel} v=${tr} on=${e=>setR(e.target.value)} opts=${[['','Todos os pneus'],...ids.map(x=>[x,x])]}/></div>
+  <div class="sm:ml-auto flex flex-wrap gap-2"><${Btn} p=${1} on=${()=>setM({k:'swap'})}>Registrar troca<//><${Btn} on=${()=>setM({k:'rotate'})}>Registrar rodízio<//><${Btn} on=${()=>setM({k:'past'})}>Registrar evento anterior<//></div></div>
+ <div class="overflow-x-auto rounded-lg border border-line bg-panel"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Data','Tipo','Motivo','Pneu','Veículo e posição','Km / horímetro','Valor unit. do pneu','Custo do evento',''].map((h,i)=>html`<th key=${i} class="font-medium px-3 py-2">${h}</th>`)}</tr></thead><tbody>
+ ${rows.map(h=>html`<tr key=${h.id} class="border-t border-line"><td class="px-3 py-2">${fmtD(h.date)}</td><td class="px-3 py-2 font-semibold">${h.type}${h.past&&html` <span class="ml-1 rounded border border-line px-1.5 text-xs font-normal text-mute">Retroativo</span>`}</td><td class="px-3 py-2">${h.reason}${h.note&&html`<div class="text-xs text-mute">${h.note}</div>`}</td><td class="px-3 py-2">${who(h)}</td><td class="px-3 py-2">${h.plate} · ${h.pos||'—'}</td><td class="px-3 py-2 tabular-nums">${mv(s,h.plate,h.km)}</td><td class="px-3 py-2 tabular-nums">${brlU(unitOf(s,h))}</td><td class="px-3 py-2 tabular-nums">${brl(h.cost)}</td>
+  <td class="px-3 py-2 text-right">${h.past&&(del===h.id?html`<${Btn} sm=${1} on=${()=>{mut(n=>{n.history=n.history.filter(x=>x.id!==h.id)});setDel('')}}>Confirmar exclusão<//>`:html`<${Btn} sm=${1} on=${()=>setDel(h.id)}>Excluir<//>`)}</td></tr>`)}
+ </tbody><tfoot><tr class="border-t border-line font-semibold"><td class="px-3 py-2" colSpan="7">Custo total do filtro</td><td class="px-3 py-2 tabular-nums">${brl(rows.reduce((a,h)=>a+(h.cost||0),0))}</td><td></td></tr></tfoot></table>${!rows.length&&html`<p class="p-4 text-sm text-mute">Nenhum registro para esse filtro.</p>`}</div>`}
+
+const MESES=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+const mlabel=k=>MESES[+k.slice(5,7)-1]+'/'+k.slice(2,4);
+const addM=(k,n)=>{const m=+k.slice(5,7)-1+n,Y=+k.slice(0,4)+Math.floor(m/12),M=((m%12)+12)%12;return Y+'-'+String(M+1).padStart(2,'0')};
+const grp=(arr,fn,val)=>{const m={};arr.forEach(x=>{const k=fn(x);m[k]=(m[k]||0)+val(x)});return Object.entries(m).map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value)};
+const niceMax=m=>{if(m<=0)return 1;const p=Math.pow(10,Math.floor(Math.log10(m))),f=m/p;return (f<=1?1:f<=2?2:f<=5?5:10)*p};
+const brlAx=v=>'R$ '+(v>=1000?(v/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mil':v);
+const Tile=({l,v,sub,sm})=>html`<div class=${'min-w-0 rounded-md border border-line bg-panel '+(sm?'p-3':'p-4')}><div class=${sm?'text-xs text-mute':'text-sm text-mute'}>${l}</div><div class=${(sm?'mt-1 text-lg leading-tight':'mt-1 text-3xl')+' font-semibold break-words'}>${v}</div>${sub&&html`<div class=${'mt-1 text-mute '+(sm?'text-[11px] leading-snug':'text-xs')}>${sub}</div>`}</div>`;
+const ChartCard=({title,sub,cols,rows,children,wide})=>html`<section class=${'rounded-md border border-line bg-panel p-4 '+(wide?'lg:col-span-2':'')}><h3 class="font-head text-xl font-semibold">${title}</h3>${sub&&html`<p class="text-sm text-mute">${sub}</p>`}<div class="mt-3">${children}</div>
+ <details class="mt-3 text-sm"><summary class="cursor-pointer text-mute">Ver como tabela</summary><div class="overflow-x-auto"><table class="tbl mt-2 w-full text-sm"><thead><tr>${cols.map(c=>html`<th key=${c} class="px-2 py-1 text-left font-medium">${c}</th>`)}</tr></thead><tbody>${rows.map((r,i)=>html`<tr key=${i}>${r.map((c,j)=>html`<td key=${j} class="px-2 py-1">${c}</td>`)}</tr>`)}</tbody></table></div></details></section>`;
+const Empty=({children})=>html`<p class="rounded-md border border-dashed border-line p-4 text-sm text-mute">${children}</p>`;
+
+function ColChart({data,fmtAxis,label}){
+ const [h,setH]=useState(-1);
+ const W=640,H=220,pl=52,pr=8,pt=14,pb=26,n=data.length;
+ const max=niceMax(Math.max(...data.map(d=>d.value),0)),band=(W-pl-pr)/n,bw=Math.min(24,band*0.6),y0=H-pb,ph=H-pt-pb;
+ const top=data.reduce((b,d,i)=>d.value>data[b].value?i:b,0),step=Math.ceil(n/12);
+ const yy=v=>y0-v/max*ph;
+ return html`<div class="relative"><svg viewBox=${'0 0 '+W+' '+H} class="w-full" role="img" aria-label=${label}>
+  ${[0,.5,1].map(f=>html`<g key=${f}><line x1=${pl} x2=${W-pr} y1=${yy(max*f)} y2=${yy(max*f)} stroke=${f===0?'var(--axis)':'var(--line)'} strokeWidth="1"/><text x=${pl-6} y=${yy(max*f)+4} textAnchor="end" fontSize="11" fill="var(--mute)">${fmtAxis(max*f)}</text></g>`)}
+  ${data.map((d,i)=>{const x=pl+band*i+(band-bw)/2,hh=d.value/max*ph,y=y0-hh,r=Math.min(4,hh);
+   return html`<g key=${d.k} opacity=${h<0||h===i?1:.5}>${hh>0&&html`<path d=${'M'+x+','+y0+' V'+(y+r)+' Q'+x+','+y+' '+(x+r)+','+y+' H'+(x+bw-r)+' Q'+(x+bw)+','+y+' '+(x+bw)+','+(y+r)+' V'+y0+' Z'} fill="var(--s1)"/>`}
+    ${i===top&&d.value>0&&html`<text x=${x+bw/2} y=${y-5} textAnchor="middle" fontSize="11" fill="var(--ink)">${d.short}</text>`}
+    ${i%step===0&&html`<text x=${x+bw/2} y=${H-8} textAnchor="middle" fontSize="11" fill="var(--mute)">${d.label}</text>`}
+    <rect x=${pl+band*i} y="0" width=${band} height=${H} fill="transparent" tabIndex="0" onMouseEnter=${()=>setH(i)} onMouseLeave=${()=>setH(-1)} onFocus=${()=>setH(i)} onBlur=${()=>setH(-1)}/></g>`})}
+ </svg>
+ ${h>=0&&html`<div class="pointer-events-none absolute z-10 rounded-md border border-line bg-panel px-2 py-1 text-xs shadow-lg" style=${{left:((pl+band*h+band/2)/W*100)+'%',top:Math.max(0,(y0-data[h].value/max*ph)/H*100)+'%',transform:'translate(-50%,-115%)'}}>${data[h].tip}</div>`}</div>`}
+
+function HBar({data,fmt}){
+ const [h,setH]=useState(-1);const max=Math.max(...data.map(d=>d.value),1);
+ return html`<div class="grid gap-1">${data.map((d,i)=>html`<div key=${d.label} tabIndex="0" title=${d.label+': '+fmt(d.value)} onMouseEnter=${()=>setH(i)} onMouseLeave=${()=>setH(-1)} onFocus=${()=>setH(i)} onBlur=${()=>setH(-1)} class=${'flex items-center gap-3 rounded px-2 py-1 text-sm '+(h===i?'bg-bg':'')}>
+  <div class="w-28 shrink-0 truncate text-mute">${d.label}</div>
+  <div class="flex flex-1 items-center gap-2"><div style=${{width:Math.max(d.value/max*100,d.value>0?1.5:0)+'%',height:'16px',background:'var(--s1)',borderRadius:'0 4px 4px 0',opacity:h<0||h===i?1:.55}}></div><span class="whitespace-nowrap">${fmt(d.value)}</span></div></div>`)}</div>`}
+
+const loadLib=(url,name)=>window[name]?Promise.resolve():new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=url;sc.onload=()=>window[name]?res():rej(new Error('lib '+name));sc.onerror=()=>rej(new Error('lib '+name));document.head.appendChild(sc)});
+const LIB_XLSX='https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',LIB_DOCX='https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js';
+const chartPng=async(title,items,fmt,opt)=>{
+ const rows=items.slice(0,24),W=1200,pad=60,rowH=44,Hh=Math.max(260,150+rows.length*rowH),sc=2;
+ const c=document.createElement('canvas');c.width=W*sc;c.height=Hh*sc;const g=c.getContext('2d');g.scale(sc,sc);
+ g.fillStyle='#FFFFFF';g.fillRect(0,0,W,Hh);
+ g.fillStyle='#191919';g.font='bold 30px Arial, sans-serif';g.textBaseline='top';g.fillText(title,pad,28);
+ const max=Math.max(...rows.map(r=>r.value),1);const col=opt&&opt.col?opt.col:'#257de0';
+ if(opt&&opt.vertical){
+  const x0=pad+70,x1=W-pad,y1=Hh-70,y0=110,band=(x1-x0)/rows.length,bw=Math.min(48,band*.6);
+  g.strokeStyle='#C2C2C2';g.lineWidth=1;g.beginPath();g.moveTo(x0,y1);g.lineTo(x1,y1);g.stroke();
+  g.fillStyle='#666';g.font='20px Arial, sans-serif';g.textAlign='right';g.fillText(fmt(max),x0-10,y0-8);g.fillText(fmt(0),x0-10,y1-22);
+  rows.forEach((r,i)=>{const h=r.value/max*(y1-y0),x=x0+band*i+(band-bw)/2;g.fillStyle=col;if(h>0){const rr=Math.min(6,h);g.beginPath();g.moveTo(x,y1);g.lineTo(x,y1-h+rr);g.quadraticCurveTo(x,y1-h,x+rr,y1-h);g.lineTo(x+bw-rr,y1-h);g.quadraticCurveTo(x+bw,y1-h,x+bw,y1-h+rr);g.lineTo(x+bw,y1);g.closePath();g.fill()}
+   g.fillStyle='#191919';g.textAlign='center';g.font='19px Arial, sans-serif';if(r.value>0)g.fillText(fmt(r.value),x+bw/2,y1-h-26);g.fillStyle='#666';g.fillText(r.label,x+bw/2,y1+12)});
+ }else{
+  const lx=pad,bx=pad+250,bmax=W-pad-250-250;
+  rows.forEach((r,i)=>{const y=110+i*rowH,w=Math.max(r.value/max*bmax,r.value>0?4:0);g.fillStyle='#666';g.font='22px Arial, sans-serif';g.textAlign='left';g.fillText(String(r.label).slice(0,22),lx,y+6);
+   g.fillStyle=r.c||col;if(w>0){g.beginPath();g.moveTo(bx,y);g.lineTo(bx+w-6,y);g.quadraticCurveTo(bx+w,y,bx+w,y+6);g.lineTo(bx+w,y+22);g.quadraticCurveTo(bx+w,y+28,bx+w-6,y+28);g.lineTo(bx,y+28);g.closePath();g.fill()}
+   g.fillStyle='#191919';g.fillText(fmt(r.value),bx+w+12,y+6)});
+ }
+ const blob=await new Promise(res=>c.toBlob(res,'image/png'));
+ return {data:new Uint8Array(await blob.arrayBuffer()),w:W,h:Hh};
+};
+const exportCharts=async(R)=>{
+ const out=[];
+ if(R.months.length)out.push({title:'Custo por mês',...await chartPng('Custo por mês (R$)',R.months.map(m=>({label:m.label,value:m.value})),v=>brlN(v),{vertical:1})});
+ if(R.byVeh.length)out.push({title:'Custo por veículo',...await chartPng('Custo por veículo (R$)',R.byVeh,v=>brlN(v))});
+ if(R.byType.length)out.push({title:'Registros por tipo',...await chartPng('Registros por tipo',R.byType,v=>String(v))});
+ if(R.byStatus.some(x=>x.value>0))out.push({title:'Valor por situação',...await chartPng('Valor dos pneus por situação (R$)',R.byStatus.filter(x=>x.value>0).map(x=>({label:x.label,value:x.value,c:x.hex})),v=>brlN(v))});
+ if(R.byBrand.length)out.push({title:'Valor investido por marca',...await chartPng('Valor investido por marca (R$)',R.byBrand,v=>brlN(v))});
+ if(R.fuel.months.some(m=>m.value>0))out.push({title:'Gasto com combustível por mês',...await chartPng('Gasto com combustível por mês (R$)',R.fuel.months.map(m=>({label:m.label,value:m.value})),v=>brlN(v),{vertical:1})});
+ const fg=R.fuel.veh.filter(v=>v.value>0).map(v=>({label:v.plate,value:v.value})).sort((a,b)=>b.value-a.value);
+ if(fg.length)out.push({title:'Gasto por veículo',...await chartPng('Gasto com combustível por veículo (R$)',fg,v=>brlN(v))});
+ const fk=R.fuel.veh.filter(v=>v.kmL!=null).map(v=>({label:v.plate,value:v.kmL})).sort((a,b)=>b.value-a.value);
+ if(fk.length)out.push({title:'Consumo médio por veículo',...await chartPng('Consumo médio por veículo (km/L)',fk,v=>Number(v).toFixed(2).replace('.',',')+' km/L')});
+ return out;
+};
+const brlN=v=>'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fileStamp=()=>new Date().toISOString().slice(0,10);
+
+async function exportXlsx(R){
+ await loadLib(LIB_XLSX,'ExcelJS');
+ const wb=new ExcelJS.Workbook();wb.creator='Controle de pneus';wb.created=new Date();
+ const HEAD={font:{bold:true,color:{argb:'FFFFFFFF'}},fill:{type:'pattern',pattern:'solid',fgColor:{argb:'FF1B1D20'}},alignment:{vertical:'middle'}};
+ const MON='"R$" #,##0.00';
+ const sheet=(name,cols,rows,fm)=>{const ws=wb.addWorksheet(name,{views:[{state:'frozen',ySplit:1}]});ws.columns=cols.map((c,i)=>({header:c[0],width:c[1],style:c[2]?{numFmt:c[2]}:{}}));rows.forEach(r=>ws.addRow(r));ws.getRow(1).eachCell(c=>{Object.assign(c,HEAD)});ws.getRow(1).height=22;if(rows.length)ws.autoFilter={from:{row:1,column:1},to:{row:1,column:cols.length}};return ws};
+ const ws=wb.addWorksheet('Resumo');ws.columns=[{width:34},{width:20},{width:16},{width:16}];
+ ws.addRow(['Relatório de pneus da frota']).font={bold:true,size:16};
+ ws.addRow(['Período',R.periodo]);ws.addRow(['Veículo',R.veiculo]);ws.addRow(['Gerado em',R.geradoEm]);ws.addRow([]);
+ const block=(title,cols,rows,fmts)=>{const t=ws.addRow([title]);t.font={bold:true,size:13};const h=ws.addRow(cols);h.eachCell(c=>Object.assign(c,HEAD));rows.forEach(r=>{const x=ws.addRow(r);(fmts||[]).forEach((f,i)=>{if(f)x.getCell(i+1).numFmt=f})});ws.addRow([])};
+ block('Indicadores do período',['Indicador','Valor'],[['Trocas',R.k.trocas],['Rodízios',R.k.rod],['Registros',R.k.regs],['Custo no período',R.k.custo],['Custo médio por troca',R.k.medio]],[null,null]);
+ ws.eachRow(r=>{if(r.getCell(1).value==='Custo no período'||r.getCell(1).value==='Custo médio por troca')r.getCell(2).numFmt=MON});
+ block('Custo por mês',['Mês','Custo','Registros'],R.months.map(m=>[m.label,m.value,m.n]),[null,MON]);
+ block('Custo por veículo',['Veículo','Custo'],R.byVeh.map(d=>[d.label,d.value]),[null,MON]);
+ block('Registros por tipo',['Tipo','Registros'],R.byType.map(d=>[d.label,d.value]));
+ if(R.byReason.length)block('Motivo das trocas e retiradas',['Motivo','Registros'],R.byReason.map(d=>[d.label,d.value]));
+ block('Pneus: valor por situação',['Status','Pneus','Valor'],R.byStatus.map(x=>[x.label,x.n,x.value]),[null,null,MON]);
+ block('Valor investido por marca',['Marca','Valor'],R.byBrand.map(d=>[d.label,d.value]),[null,MON]);
+ block('Abastecimentos: indicadores do período',['Indicador','Valor'],[['Abastecimentos',R.fuel.k.n],['Litros',R.fuel.k.liters],['Gasto total (R$)',R.fuel.k.value],['Preço médio do litro (R$)',R.fuel.k.priceL],['Km rodado',R.fuel.k.dist],['Consumo médio (km/L)',R.fuel.k.kmL]],[null,null]);
+ ws.eachRow(r=>{const f={'Litros':'#,##0.0','Gasto total (R$)':MON,'Preço médio do litro (R$)':'"R$" #,##0.000','Consumo médio (km/L)':'#,##0.00','Km rodado':'#,##0'}[r.getCell(1).value];if(f)r.getCell(2).numFmt=f});
+ block('Abastecimentos por mês',['Mês','Abastecimentos','Litros','Gasto','Preço médio/L'],R.fuel.months.map(m=>[m.label,m.n,m.liters,m.value,m.priceL]),[null,null,'#,##0.0',MON,'"R$" #,##0.000']);
+ block('Abastecimentos por veículo',['Veículo / equipamento','Abastecimentos','Litros','Gasto','Preço médio/L','Rodado (km ou h)','Média por dia','Média por mês','Consumo (km/L ou L/h)','Unidade'],R.fuel.veh.map(v=>[v.plate,v.n,v.liters,v.value,v.priceL,v.dist,v.perDay,v.perMonth,v.kmL,v.u+' · '+v.cu]),[null,null,'#,##0.0',MON,'"R$" #,##0.000','#,##0.0','#,##0.0','#,##0','#,##0.00',null]);
+ sheet('Custo por pneu',[['Fogo',12],['Marca',16],['Modelo',18],['Medida',16],['Tipo',11],['Status',12],['Compra (R$)',14,MON],['Custos (R$)',14,MON],['Total (R$)',14,MON],['Km rodado',12,'#,##0'],['R$ por km',12,MON]],R.tires.map(r=>[r.id,r.brand,r.model,r.size,r.cond,r.status,r.price,r.custo,r.total,r.km,r.ckm==null?null:r.ckm]));
+ sheet('Abastecimentos',[['Data',12],['Veículo',12],['Km',12,'#,##0'],['Litros',11,'#,##0.00'],['Preço por litro (R$)',18,'"R$" #,##0.000'],['Valor (R$)',14,MON],['Tanque cheio',13],['Observação',30]],R.fuel.rows.map(x=>[x.date,x.plate,x.km,x.liters,x.price,x.value,x.full,x.note]));
+ sheet('Histórico',[['Data',12],['Tipo',12],['Motivo',14],['Pneu',14],['Veículo',12],['Posição',28],['Km ou horas',12,'#,##0'],['Valor unit. do pneu (R$)',20,MON],['Custo do evento (R$)',18,MON],['Observação',30]],R.hist.map(h=>[h.date,h.type,h.reason,h.pneu,h.plate,h.pos,h.km,h.unit==null?null:h.unit,h.cost,h.note]));
+ const imgs=await exportCharts(R);
+ if(imgs.length){const gs=wb.addWorksheet('Gráficos');let row=1;imgs.forEach(im=>{const id=wb.addImage({buffer:im.data,extension:'png'});const w=720,h=Math.round(im.h/im.w*w);gs.addImage(id,{tl:{col:0,row:row-1},ext:{width:w,height:h}});row+=Math.ceil(h/20)+2})}
+ const buf=await wb.xlsx.writeBuffer();
+ return {filename:'relatorio-pneus-'+fileStamp()+'.xlsx',data:new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})};
+}
+
+async function exportDocx(R){
+ await loadLib(LIB_DOCX,'docx');
+ const D=window.docx,{Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,ImageRun,HeadingLevel,AlignmentType,ShadingType,PageOrientation,BorderStyle}=D;
+ const FONT='Calibri';
+ const P=(t,o)=>new Paragraph({...(o||{}),children:[new TextRun({text:String(t),font:FONT,...((o&&o.run)||{})})]});
+ const H1=t=>new Paragraph({heading:HeadingLevel.HEADING_1,spacing:{before:300,after:120},children:[new TextRun({text:t,font:FONT,bold:true,size:30})]});
+ const H2=t=>new Paragraph({heading:HeadingLevel.HEADING_2,spacing:{before:200,after:80},children:[new TextRun({text:t,font:FONT,bold:true,size:24})]});
+ const B={style:BorderStyle.SINGLE,size:4,color:'D3D7DC'};const borders={top:B,bottom:B,left:B,right:B};
+ const cell=(t,w,o)=>new TableCell({width:{size:w,type:WidthType.DXA},borders,margins:{top:50,bottom:50,left:90,right:90},shading:o&&o.head?{type:ShadingType.CLEAR,fill:'1B1D20',color:'auto'}:undefined,children:[new Paragraph({alignment:o&&o.right?AlignmentType.RIGHT:AlignmentType.LEFT,children:[new TextRun({text:String(t==null?'':t),font:FONT,size:o&&o.small?17:20,bold:!!(o&&(o.head||o.bold)),color:o&&o.head?'FFFFFF':undefined})]})]});
+ const table=(cols,rows,widths,rightFrom,o)=>{const tot=widths.reduce((a,b)=>a+b,0);return new Table({width:{size:tot,type:WidthType.DXA},columnWidths:widths,rows:[new TableRow({tableHeader:true,children:cols.map((c,i)=>cell(c,widths[i],{head:1,small:o&&o.small,right:rightFrom!=null&&i>=rightFrom}))}),...rows.map(r=>new TableRow({cantSplit:true,children:r.map((c,i)=>cell(c,widths[i],{small:o&&o.small,right:rightFrom!=null&&i>=rightFrom}))}))]})};
+ const empty=t=>P(t,{run:{color:'666666',italics:true}});
+ const kids=[];
+ kids.push(new Paragraph({spacing:{after:60},children:[new TextRun({text:'Relatório de pneus da frota',font:FONT,bold:true,size:44})]}));
+ kids.push(P('Período: '+R.periodo+'   |   Veículo: '+R.veiculo+'   |   Gerado em '+R.geradoEm,{run:{color:'666666',size:20}}));
+ kids.push(H1('Resumo do período'));
+ kids.push(table(['Indicador','Valor'],[['Trocas',R.k.trocas],['Rodízios',R.k.rod],['Registros no total',R.k.regs],['Custo no período',brlN(R.k.custo)],['Custo médio por troca',R.k.trocas?brlN(R.k.medio):'—']],[6000,3000],1));
+ const imgs=await exportCharts(R);const IM={};imgs.forEach(i=>IM[i.title]=i);
+ const img=t=>{const i=IM[t];if(!i)return null;const w=620;return new Paragraph({spacing:{before:120,after:120},children:[new ImageRun({data:i.data,transformation:{width:w,height:Math.round(i.h/i.w*w)},type:'png'})]})};
+ kids.push(H1('Trocas e custos'));
+ if(!R.hist.length)kids.push(empty('Nenhum registro no período e veículo escolhidos.'));
+ else{
+  [['Custo por mês',['Mês','Custo','Registros'],R.months.map(m=>[m.label,brlN(m.value),m.n]),[3000,3500,2500]],
+   ['Custo por veículo',['Veículo','Custo'],R.byVeh.map(d=>[d.label,brlN(d.value)]),[4500,4500]],
+   ['Registros por tipo',['Tipo','Registros'],R.byType.map(d=>[d.label,d.value]),[4500,4500]],
+   ...(R.byReason.length?[['Motivo das trocas e retiradas',['Motivo','Registros'],R.byReason.map(d=>[d.label,d.value]),[4500,4500]]]:[])]
+  .forEach(([t,c,r,w])=>{kids.push(H2(t));const im=img(t);if(im)kids.push(im);kids.push(table(c,r,w,1))});
+ }
+ kids.push(H1('Pneus e valores'));
+ kids.push(P('Situação atual dos pneus'+(R.veiculo!=='Todos os veículos'?' instalados em '+R.veiculo:'')+'. Não depende do período.',{run:{color:'666666',size:20}}));
+ kids.push(table(['Indicador','Valor'],[['Pneus cadastrados',R.tireCount],['Valor investido',brlN(R.inv)],['Valor em estoque',brlN(R.byStatus[1].value)],['Valor sucateado',brlN(R.byStatus[3].value)]],[6000,3000],1));
+ kids.push(H2('Valor por situação'));{const im=img('Valor por situação');if(im)kids.push(im)}
+ kids.push(table(['Status','Pneus','Valor'],R.byStatus.map(x=>[x.label,x.n,brlN(x.value)]),[3500,2000,3500],1));
+ if(R.byBrand.length){kids.push(H2('Valor investido por marca'));const im=img('Valor investido por marca');if(im)kids.push(im);kids.push(table(['Marca','Valor'],R.byBrand.map(d=>[d.label,brlN(d.value)]),[4500,4500],1))}
+ kids.push(H1('Abastecimentos'));
+ if(!R.fuel.k.n)kids.push(empty('Nenhum abastecimento no período e veículo escolhidos.'));
+ else{
+  const F=R.fuel,f2s=v=>v==null?'—':Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}),f3s=v=>v==null?'—':'R$ '+Number(v).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3}),f1s=v=>Number(v).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
+  kids.push(table(['Indicador','Valor'],[['Abastecimentos',F.k.n],['Litros',f1s(F.k.liters)+' L'],['Gasto total',brlN(F.k.value)],['Preço médio do litro',f3s(F.k.priceL)],['Km rodado dos veículos (entre o 1º e o último abastecimento)',F.k.dist?Number(F.k.dist).toLocaleString('pt-BR')+' km':'—'],['Consumo médio dos veículos',F.k.kmL==null?'—':f2s(F.k.kmL)+' km/L'],...(F.k.hasEq?[['Horas trabalhadas dos equipamentos',F.k.hrs?f1s(F.k.hrs)+' h':'—'],['Consumo médio dos equipamentos',F.k.lh==null?'—':f2s(F.k.lh)+' L/h']]:[])],[6000,3000],1));
+  kids.push(H2('Gasto com combustível por mês'));{const im=img('Gasto com combustível por mês');if(im)kids.push(im)}
+  kids.push(table(['Mês','Abastec.','Litros','Gasto','Preço médio/L'],F.months.map(m=>[m.label,m.n,m.liters?f1s(m.liters)+' L':'—',brlN(m.value),f3s(m.priceL)]),[1800,1500,1900,2000,1800],1));
+  if(R.fuel.veh.some(v=>v.value>0)){kids.push(H2('Gasto por veículo'));const im=img('Gasto por veículo');if(im)kids.push(im)}
+  if(R.fuel.veh.some(v=>v.kmL!=null)){kids.push(H2('Consumo médio por veículo'));const im=img('Consumo médio por veículo');if(im)kids.push(im)}
+  kids.push(H2('Resumo por veículo'));
+  kids.push(table(['Veículo / equip.','Abast.','Litros','Gasto','R$/L','Rodado','Média/dia','Média/mês','Consumo'],F.veh.map(v=>[v.plate,v.n,f1s(v.liters),brlN(v.value),f3s(v.priceL),v.dist==null?'—':Number(v.dist).toLocaleString('pt-BR')+' '+v.u,v.perDay==null?'—':(v.eq?f1s(v.perDay):Math.round(v.perDay).toLocaleString('pt-BR'))+' '+v.u,v.perMonth==null?'—':(v.eq?f1s(v.perMonth):Math.round(v.perMonth).toLocaleString('pt-BR'))+' '+v.u,v.kmL==null?'—':f2s(v.kmL)+' '+v.cu]),[1300,800,1000,1400,1200,1100,900,1000,800],1,{small:1}));
+ }
+ const sec1=kids.slice();
+ const kids2=[H1('Custo por pneu'),P('Compra mais os custos lançados no Histórico. O custo por km usa os km rodados nos veículos.',{run:{color:'666666',size:20}})];
+ if(R.tires.length)kids2.push(table(['Fogo','Pneu','Medida','Status','Compra','Custos','Total','Km rodado','R$/km'],R.tires.map(r=>[r.id,r.brand+' '+r.model,r.size,r.status,brlN(r.price),brlN(r.custo),brlN(r.total),Number(r.km).toLocaleString('pt-BR'),r.ckm==null?'—':brlN(r.ckm)]),[1000,2200,1500,1200,1500,1400,1500,1200,1300],4,{small:1}));else kids2.push(empty('Nenhum pneu cadastrado.'));
+ kids2.push(H1('Histórico do período'));
+ if(R.hist.length)kids2.push(table(['Data','Tipo','Motivo','Pneu','Veículo e posição','Km / h','Valor unit.','Custo'],R.hist.map(h=>[h.date,h.type,h.reason,h.pneu,h.plate+' · '+(h.pos||'—'),Number(h.km).toLocaleString('pt-BR')+' '+h.u,h.unit==null?'—':brlN(h.unit),brlN(h.cost)]),[1100,1100,1200,1500,3000,1200,1500,1400],5,{small:1}));else kids2.push(empty('Nenhum registro no período.'));
+ const page={size:{width:11906,height:16838,orientation:PageOrientation.PORTRAIT},margin:{top:1000,bottom:1000,left:1100,right:1100}};
+ const pageL={size:{width:11906,height:16838,orientation:PageOrientation.LANDSCAPE},margin:{top:900,bottom:900,left:900,right:900}};
+ const doc=new Document({creator:'Controle de pneus',title:'Relatório de pneus da frota',sections:[{properties:{page},children:sec1},{properties:{page:pageL},children:kids2}]});
+ const blob=await Packer.toBlob(doc);
+ return {filename:'relatorio-pneus-'+fileStamp()+'.docx',data:blob};
+}
+
+function Relatorios({s}){
+ const [per,setPer]=useState('365');const [from,setFrom]=useState('');const [to,setTo]=useState('');const [pl,setPl]=useState('');const [msg,setMsg]=useState('');const [box,setBox]=useState('');const [dl,setDl]=useState(null);const [busy,setBusy]=useState('');
+ useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
+ const start=per==='all'?'':per==='custom'?from:(()=>{const d=new Date();d.setDate(d.getDate()-(+per));return d.toISOString().slice(0,10)})();
+ const end=per==='custom'&&to?to:'9999-12-31';
+ const H=s.history.filter(h=>(!start||h.date>=start)&&h.date<=end&&(!pl||h.plate===pl));
+ const plates=[...new Set([...s.vehicles.map(x=>x.plate),...s.history.map(h=>h.plate)])];
+ const sum=a=>a.reduce((x,h)=>x+(h.cost||0),0);
+ const trocas=H.filter(h=>h.type==='Troca'),rod=H.filter(h=>h.type==='Rodízio');
+ const byM={};H.forEach(h=>{const k=h.date.slice(0,7);byM[k]=byM[k]||{c:0,n:0};byM[k].c+=h.cost||0;byM[k].n++});
+ const ks=Object.keys(byM).sort();
+ let months=[];if(ks.length){let k=ks[0];while(k<=ks[ks.length-1]&&months.length<60){months.push(k);k=addM(k,1)}months=months.slice(-24)}
+ const mdata=months.map(k=>{const m=byM[k]||{c:0,n:0};return {k,label:mlabel(k),value:m.c,short:brl(m.c),tip:mlabel(k)+': '+brl(m.c)+' em '+m.n+(m.n===1?' registro':' registros')}});
+ const byType=grp(H,h=>h.type,()=>1),byReason=grp(H.filter(h=>(h.type==='Troca'||h.type==='Retirada')&&h.reason&&h.reason!=='—'),h=>h.reason,()=>1),byVeh=grp(H,h=>h.plate,h=>h.cost||0);
+ const T=s.tires.filter(t=>!pl||t.plate===pl);
+ const inv=T.reduce((a,t)=>a+(t.price||0),0);
+ const SL=['var(--s1)','var(--s2)','var(--s3)','var(--s4)'],SI=['#fff','#fff','#fff','#0b0b0b'];
+ const byStatus=Object.keys(ST).map((k,i)=>({k,label:ST[k],n:T.filter(t=>t.status===k).length,value:T.filter(t=>t.status===k).reduce((a,t)=>a+(t.price||0),0),c:SL[i],ic:SI[i],hex:['#257de0','#f47230','#00b894','#f2a600'][i]}));
+ const byBrand=grp(T,t=>t.brand,t=>t.price||0).slice(0,8);
+ const hc={};s.history.forEach(h=>{hc[h.tireId]=(hc[h.tireId]||0)+(h.cost||0)});
+ const tr=T.map(t=>{const c=hc[t.id]||0,km=kmTire(s,t),tot=(t.price||0)+c;return {t,c,km,tot,ckm:km>0?tot/km:null}}).sort((a,b)=>b.tot-a.tot);
+ const num=n=>String(Math.round(n*100)/100).replace('.',',');
+ const esc=x=>'"'+String(x==null?'':x).replace(/"/g,'""')+'"';
+ const csv=rows=>rows.map(r=>r.map(esc).join(';')).join('\n');
+ const copy=async(txt,nome)=>{try{await navigator.clipboard.writeText(txt);setBox('');setMsg(nome+' copiado. Cole em uma planilha.')}catch(e){setBox(txt);setMsg('Não foi possível copiar sozinho. Selecione o texto abaixo e copie.')}};
+ const csvH=()=>csv([['Data','Tipo','Motivo','Pneu','Veículo','Posição','Km ou horas','Valor unitário do pneu (R$)','Custo do evento (R$)','Observação'],...H.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(h=>[fmtD(h.date),h.type,h.reason,h.tireId+(h.tireOut?' / '+h.tireOut:''),h.plate,h.pos||'',h.km,unitOf(s,h)==null?'':num(unitOf(s,h)),num(h.cost||0),h.note||''])]);
+ const csvT=()=>csv([['Fogo','Marca','Modelo','Medida','Tipo','Status','Compra (R$)','Custos (R$)','Total (R$)','Km rodado','Custo por km (R$)'],...tr.map(r=>[r.t.id,r.t.brand,r.t.model,r.t.size,CONDL[r.t.cond]||'',ST[r.t.status],num(r.t.price||0),num(r.c),num(r.tot),r.km,r.ckm==null?'':num(r.ckm)])]);
+ const PERL={'30':'Últimos 30 dias','90':'Últimos 90 dias','365':'Últimos 12 meses','all':'Todo o período'};
+ const buildR=()=>({periodo:per==='custom'?(from?fmtD(from):'início')+' a '+(to?fmtD(to):'hoje'):PERL[per],veiculo:pl||'Todos os veículos',geradoEm:new Date().toLocaleString('pt-BR'),
+  k:{trocas:trocas.length,rod:rod.length,regs:H.length,custo:sum(H),medio:trocas.length?sum(trocas)/trocas.length:0},
+  months:months.map(k=>({label:mlabel(k),value:(byM[k]||{c:0}).c,n:(byM[k]||{n:0}).n})),byVeh,byType,byReason,byStatus,byBrand,tireCount:T.length,inv,
+  fuel:{k:fT,months:fmd,veh:fst.map(x=>({plate:x.p,model:x.model,n:x.r.n,liters:x.r.liters,value:x.r.value,priceL:x.r.priceL,dist:x.r.dist,perDay:x.r.perDay,perMonth:x.r.perMonth,kmL:x.eq&&x.r.kmL?1/x.r.kmL:x.r.kmL,eq:x.eq,u:x.u,cu:x.eq?'L/h':'km/L'})),rows:FF.map(x=>({date:fmtD(x.date),plate:x.plate,u:mt(s,x.plate).u,km:x.km,liters:x.liters,price:x.value>0?x.value/x.liters:null,value:x.value||0,full:x.full?'Sim':'Não',note:x.note||''}))},
+  tires:tr.map(r=>({id:r.t.id,brand:r.t.brand,model:r.t.model,size:r.t.size,cond:CONDL[r.t.cond]||'',status:ST[r.t.status],price:r.t.price||0,custo:r.c,total:r.tot,km:r.km,ckm:r.ckm})),
+  hist:sortH(H).map(h=>({date:fmtD(h.date),type:h.type,reason:h.reason,pneu:h.tireId+(h.tireOut?' / '+h.tireOut:''),plate:h.plate,pos:h.pos||'',km:h.km,u:mt(s,h.plate).u,unit:unitOf(s,h),cost:h.cost||0,note:h.note||''}))});
+ const exportar=async kind=>{if(busy||!dl)return;setBusy(kind);setMsg('');setBox('');
+  try{const f=await (kind==='xlsx'?exportXlsx:exportDocx)(buildR());await dl.save(f);setMsg((kind==='xlsx'?'Excel':'Word')+' salvo.')}
+  catch(e){setMsg(e&&e.code==='declined'?'Download cancelado.':e&&e.code?'Não foi possível salvar o arquivo ('+e.code+').':'Não foi possível gerar o arquivo. Verifique a conexão e tente de novo.')}
+  finally{setBusy('')}};
+ const totalS=byStatus.reduce((a,x)=>a+x.value,0);
+ const FF=(s.fuel||[]).filter(x=>(!start||x.date>=start)&&x.date<=end&&(!pl||x.plate===pl)).sort((a,b)=>a.date.localeCompare(b.date)||a.km-b.km);
+ const fst=[...new Set(FF.map(x=>x.plate))].sort().map(p=>({p,model:(s.vehicles.find(v=>v.plate===p)||{}).model||'',eq:mt(s,p).eq,u:mt(s,p).u,r:fuelStatsL(FF.filter(x=>x.plate===p))}));
+ const fLit=FF.reduce((a,x)=>a+x.liters,0),fVal=FF.reduce((a,x)=>a+(x.value||0),0),fLv=FF.filter(x=>x.value>0).reduce((a,x)=>a+x.liters,0),fVv=FF.reduce((a,x)=>a+(x.value>0?x.value:0),0);
+ const fV=fst.filter(x=>!x.eq),fE=fst.filter(x=>x.eq),fDist=fV.reduce((a,x)=>a+(x.r.dist||0),0),fKd=fV.reduce((a,x)=>a+(x.r.kmLd||0),0),fKl=fV.reduce((a,x)=>a+(x.r.kmLl||0),0),fHrs=fE.reduce((a,x)=>a+(x.r.dist||0),0),fHd=fE.reduce((a,x)=>a+(x.r.kmLd||0),0),fHl=fE.reduce((a,x)=>a+(x.r.kmLl||0),0);
+ const fT={n:FF.length,liters:fLit,value:fVal,priceL:fLv>0?fVv/fLv:null,dist:fDist,kmL:fKl>0?fKd/fKl:null,hasEq:fE.length>0,hrs:fHrs,lh:fHd>0?fHl/fHd:null};
+ const fByM={};FF.forEach(x=>{const k=x.date.slice(0,7);const m=fByM[k]=fByM[k]||{n:0,l:0,v:0,lv:0,vv:0};m.n++;m.l+=x.liters;m.v+=x.value||0;if(x.value>0){m.lv+=x.liters;m.vv+=x.value}});
+ const fks=Object.keys(fByM).sort();let fMonths=[];if(fks.length){let k=fks[0];while(k<=fks[fks.length-1]&&fMonths.length<60){fMonths.push(k);k=addM(k,1)}fMonths=fMonths.slice(-24)}
+ const fmd=fMonths.map(k=>{const m=fByM[k]||{n:0,l:0,v:0,lv:0,vv:0};return{k,label:mlabel(k),n:m.n,liters:m.l,value:m.v,priceL:m.lv>0?m.vv/m.lv:null}});
+ const fGasto=fst.map(x=>({label:x.p,value:x.r.value})).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
+ const fKmL=fst.filter(x=>!x.eq&&x.r.kmL!=null).map(x=>({label:x.p,value:x.r.kmL})).sort((a,b)=>b.value-a.value);
+ const csvF=()=>csv([['Veículo / equipamento','Modelo','Abastecimentos','Litros','Gasto (R$)','Preço médio/L (R$)','Rodado (km ou h)','Média por dia','Média por mês','Consumo (km/L ou L/h)','Unidade'],...fst.map(x=>[x.p,x.model,x.r.n,num(x.r.liters),num(x.r.value),x.r.priceL==null?'':num(x.r.priceL),x.r.dist==null?'':x.r.dist,x.r.perDay==null?'':num(x.r.perDay),x.r.perMonth==null?'':num(x.r.perMonth),x.r.kmL==null?'':num(x.eq?1/x.r.kmL:x.r.kmL),x.eq?'h · L/h':'km · km/L'])]);
+ return html`<div class="viz grid gap-5">
+ <div class="flex flex-wrap items-end gap-2">
+  <div class="w-48"><${Sel} v=${per} on=${e=>setPer(e.target.value)} opts=${[['30','Últimos 30 dias'],['90','Últimos 90 dias'],['365','Últimos 12 meses'],['all','Todo o período'],['custom','Período personalizado']]}/></div>
+  ${per==='custom'&&html`<div class="w-40"><${Inp} type="date" v=${from} on=${e=>setFrom(e.target.value)}/></div><div class="w-40"><${Inp} type="date" v=${to} on=${e=>setTo(e.target.value)}/></div>`}
+  <div class="w-48"><${Sel} v=${pl} on=${e=>setPl(e.target.value)} opts=${[['','Todos os veículos'],...plates.map(x=>[x,x])]}/></div>
+  <div class="flex flex-wrap items-center gap-2 sm:ml-auto">${dl&&html`<${Btn} p=${1} on=${()=>exportar('docx')}>${busy==='docx'?'Gerando Word...':'Baixar Word (.docx)'}<//><${Btn} on=${()=>exportar('xlsx')}>${busy==='xlsx'?'Gerando Excel...':'Baixar Excel (.xlsx)'}<//>`}${dl===false&&html`<span class="text-xs text-mute">Download de arquivos indisponível aqui. Use Copiar CSV.</span>`}</div></div>
+
+ <div><h2 class="font-head text-2xl font-semibold mb-3">Trocas e custos no período</h2>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3"><${Tile} l="Trocas" v=${trocas.length} sub=${H.length+' registros no total'}/><${Tile} l="Rodízios" v=${rod.length}/><${Tile} l="Custo no período" v=${brl(sum(H))}/><${Tile} l="Custo médio por troca" v=${trocas.length?brl(sum(trocas)/trocas.length):'—'}/></div>
+  <div class="mt-3 grid gap-3 lg:grid-cols-2">
+  ${H.length?html`
+   <${ChartCard} wide=${1} title="Custo por mês" sub="Soma dos custos registrados no Histórico" cols=${['Mês','Custo','Registros']} rows=${months.map(k=>[mlabel(k),brl((byM[k]||{c:0}).c),(byM[k]||{n:0}).n])}><${ColChart} data=${mdata} fmtAxis=${brlAx} label="Custo por mês"/><//>
+   <${ChartCard} title="Custo por veículo" cols=${['Veículo','Custo']} rows=${byVeh.map(d=>[d.label,brl(d.value)])}><${HBar} data=${byVeh} fmt=${brl}/><//>
+   <${ChartCard} title="Registros por tipo" cols=${['Tipo','Registros']} rows=${byType.map(d=>[d.label,d.value])}><${HBar} data=${byType} fmt=${v=>String(v)}/><//>
+   ${byReason.length>0&&html`<${ChartCard} title="Motivo das trocas e retiradas" cols=${['Motivo','Registros']} rows=${byReason.map(d=>[d.label,d.value])}><${HBar} data=${byReason} fmt=${v=>String(v)}/><//>`}`
+  :html`<div class="lg:col-span-2"><${Empty}>Nenhum registro neste período e veículo. Lance trocas na aba Aplicação ou registros anteriores no Histórico, ou escolha outro período.<//></div>`}
+  </div></div>
+
+ <div><h2 class="font-head text-2xl font-semibold mb-1">Pneus e valores</h2><p class="mb-3 text-sm text-mute">Situação atual dos pneus${pl?' instalados em '+pl:''}. Não depende do período escolhido.</p>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3"><${Tile} l="Pneus cadastrados" v=${T.length}/><${Tile} l="Valor investido" v=${brl(inv)} sub="Soma dos valores de compra"/><${Tile} l="Valor em estoque" v=${brl(byStatus[1].value)} sub=${byStatus[1].n+' pneus'}/><${Tile} l="Valor sucateado" v=${brl(byStatus[3].value)} sub=${byStatus[3].n+' pneus'}/></div>
+  ${T.length?html`<div class="mt-3 grid gap-3 lg:grid-cols-2">
+   <${ChartCard} title="Valor por situação" sub="Parte do valor de compra em cada status" cols=${['Status','Pneus','Valor','Parte']} rows=${byStatus.map(x=>[x.label,x.n,brl(x.value),totalS?Math.round(x.value/totalS*100)+'%':'0%'])}>
+    <div class="flex gap-0.5" role="img" aria-label="Valor por situação">${byStatus.filter(x=>x.value>0).map(x=>html`<div key=${x.k} title=${x.label+': '+brl(x.value)} style=${{flex:x.value+' 1 0',background:x.c,color:x.ic,height:'28px',borderRadius:'4px',minWidth:'4px'}} class="flex items-center overflow-hidden whitespace-nowrap px-2 text-xs font-semibold">${x.value/totalS>=.12?Math.round(x.value/totalS*100)+'%':''}</div>`)}</div>
+    <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">${byStatus.map(x=>html`<span key=${x.k} class="flex items-center gap-2"><i class="inline-block h-2.5 w-2.5 rounded-sm" style=${{background:x.c}}></i>${x.label}: ${brl(x.value)}</span>`)}</div><//>
+   <${ChartCard} title="Valor investido por marca" sub="As 8 marcas com maior valor" cols=${['Marca','Valor']} rows=${byBrand.map(d=>[d.label,brl(d.value)])}><${HBar} data=${byBrand} fmt=${brl}/><//></div>`
+  :html`<div class="mt-3"><${Empty}>Nenhum pneu para exibir. Cadastre pneus na aba Pneus.<//></div>`}</div>
+
+ <div><h2 class="font-head text-2xl font-semibold mb-1">Abastecimentos</h2><p class="mb-3 text-sm text-mute">Resumo dos abastecimentos${pl?' de '+pl:''} no período escolhido.</p>
+  <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2"><${Tile} sm=${1} l="Abastecimentos" v=${fT.n}/><${Tile} sm=${1} l="Litros" v=${FF.length?f1(fT.liters)+' L':'—'}/><${Tile} sm=${1} l="Gasto total" v=${brl(fT.value)}/><${Tile} sm=${1} l="Preço médio do litro" v=${fT.priceL==null?'—':brl3(fT.priceL)}/><${Tile} sm=${1} l=${fT.hasEq?'Km rodado (veículos)':'Km rodado'} v=${fT.dist?N(fT.dist)+' km':'—'} sub="Entre o 1º e o último abastecimento"/><${Tile} sm=${1} l=${fT.hasEq?'Consumo (veículos)':'Consumo médio'} v=${fT.kmL==null?'—':f2(fT.kmL)+' km/L'}/>${fT.hasEq&&html`<${Tile} sm=${1} l="Horas (equipamentos)" v=${fT.hrs?f1(fT.hrs)+' h':'—'} sub="Horímetro entre o 1º e o último abastecimento"/><${Tile} sm=${1} l="Consumo (equipamentos)" v=${fT.lh==null?'—':f2(fT.lh)+' L/h'}/>`}</div>
+  ${FF.length?html`<div class="mt-3 grid gap-3 lg:grid-cols-2">
+   <${ChartCard} wide=${1} title="Gasto com combustível por mês" sub="Soma dos valores dos abastecimentos" cols=${['Mês','Abastecimentos','Litros','Gasto','Preço médio/L']} rows=${fmd.map(m=>[m.label,m.n,m.liters?f1(m.liters)+' L':'—',brl(m.value),m.priceL==null?'—':brl3(m.priceL)])}><${ColChart} data=${fmd.map(m=>({k:m.k,label:m.label,value:m.value,short:brl(m.value),tip:m.label+': '+brl(m.value)+' em '+f1(m.liters)+' L'}))} fmtAxis=${brlAx} label="Gasto com combustível por mês"/><//>
+   ${fGasto.length>0&&html`<${ChartCard} title="Gasto por veículo" cols=${['Veículo','Gasto']} rows=${fGasto.map(d=>[d.label,brl(d.value)])}><${HBar} data=${fGasto} fmt=${brl}/><//>`}
+   ${fKmL.length>0&&html`<${ChartCard} title="Consumo médio por veículo" sub="km por litro (tanque cheio)" cols=${['Veículo','km/L']} rows=${fKmL.map(d=>[d.label,f2(d.value)])}><${HBar} data=${fKmL} fmt=${v=>f2(v)+' km/L'}/><//>`}</div>
+   <section class="mt-3 rounded-md border border-line bg-panel p-4"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-head text-xl font-semibold">Resumo por veículo</h3><${Btn} sm=${1} on=${()=>copy(csvF(),'CSV dos abastecimentos')}>Copiar CSV<//></div>
+    <div class="mt-3 overflow-x-auto"><table class="tbl w-full whitespace-nowrap text-sm"><thead><tr>${['Veículo / equipamento','Abastecimentos','Litros','Gasto','Preço médio/L','Rodado','Média por dia','Média por mês','Consumo'].map(c=>html`<th key=${c} class="px-3 py-2 text-left font-medium">${c}</th>`)}</tr></thead><tbody>
+    ${fst.map(x=>html`<tr key=${x.p} class="border-t border-line"><td class="px-3 py-2 font-semibold">${x.p}<div class="text-xs font-normal text-mute">${x.model}</div></td><td class="px-3 py-2 tabular-nums">${x.r.n}</td><td class="px-3 py-2 tabular-nums">${f1(x.r.liters)} L</td><td class="px-3 py-2 tabular-nums">${x.r.value>0?brl(x.r.value):'—'}</td><td class="px-3 py-2 tabular-nums">${x.r.priceL==null?'—':brl3(x.r.priceL)}</td><td class="px-3 py-2 tabular-nums">${x.r.dist==null?'—':N(x.r.dist)+' '+x.u}</td><td class="px-3 py-2 tabular-nums">${x.r.perDay==null?'—':(x.eq?f1(x.r.perDay):N(Math.round(x.r.perDay)))+' '+x.u}</td><td class="px-3 py-2 tabular-nums">${x.r.perMonth==null?'—':(x.eq?f1(x.r.perMonth):N(Math.round(x.r.perMonth)))+' '+x.u}</td><td class="px-3 py-2 tabular-nums">${x.r.kmL==null?'—':x.eq?f2(1/x.r.kmL)+' L/h':f2(x.r.kmL)+' km/L'}</td></tr>`)}
+    </tbody><tfoot><tr class="border-t border-line font-semibold"><td class="px-3 py-2">Total</td><td class="px-3 py-2 tabular-nums">${fT.n}</td><td class="px-3 py-2 tabular-nums">${f1(fT.liters)} L</td><td class="px-3 py-2 tabular-nums">${brl(fT.value)}</td><td class="px-3 py-2 tabular-nums">${fT.priceL==null?'—':brl3(fT.priceL)}</td><td class="px-3 py-2 tabular-nums">${fT.dist?N(fT.dist)+' km':'—'}${fT.hasEq&&fT.hrs?html`<div class="text-xs font-normal">${f1(fT.hrs)} h</div>`:''}</td><td class="px-3 py-2"></td><td class="px-3 py-2"></td><td class="px-3 py-2 tabular-nums">${fT.kmL==null?'—':f2(fT.kmL)+' km/L'}${fT.hasEq&&fT.lh!=null?html`<div class="text-xs font-normal">${f2(fT.lh)} L/h</div>`:''}</td></tr></tfoot></table></div></section>`
+  :html`<div class="mt-3"><${Empty}>Nenhum abastecimento neste período e veículo. Lance abastecimentos na aba Abastecimentos ou escolha outro período.<//></div>`}</div>
+
+ <section class="rounded-md border border-line bg-panel p-4"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-head text-xl font-semibold">Custo por pneu</h3><${Btn} sm=${1} on=${()=>copy(csvT(),'CSV dos pneus')}>Copiar CSV<//></div>
+  <p class="text-sm text-mute">Compra mais os custos lançados no Histórico. O custo por km usa os km rodados nos veículos.</p>
+  <div class="mt-3 overflow-x-auto"><table class="tbl w-full whitespace-nowrap text-sm"><thead><tr>${['Fogo','Pneu','Medida','Status','Compra','Custos','Total','Km rodado','R$ por km'].map(h=>html`<th key=${h} class="px-3 py-2 text-left font-medium">${h}</th>`)}</tr></thead><tbody>
+  ${tr.map(r=>html`<tr key=${r.t.id} class="border-t border-line"><td class="px-3 py-2 font-semibold">${r.t.id}</td><td class="px-3 py-2">${r.t.brand} ${r.t.model}</td><td class="px-3 py-2">${r.t.size}</td><td class="px-3 py-2">${ST[r.t.status]}</td><td class="px-3 py-2 tabular-nums">${brl(r.t.price)}</td><td class="px-3 py-2 tabular-nums">${brl(r.c)}</td><td class="px-3 py-2 tabular-nums">${brl(r.tot)}</td><td class="px-3 py-2 tabular-nums">${N(r.km)}</td><td class="px-3 py-2 tabular-nums">${r.ckm==null?'—':brl(r.ckm)}</td></tr>`)}
+  </tbody>${tr.length>0&&html`<tfoot><tr class="border-t border-line font-semibold"><td class="px-3 py-2" colSpan="4">Total</td><td class="px-3 py-2 tabular-nums">${brl(tr.reduce((a,r)=>a+(r.t.price||0),0))}</td><td class="px-3 py-2 tabular-nums">${brl(tr.reduce((a,r)=>a+r.c,0))}</td><td class="px-3 py-2 tabular-nums">${brl(tr.reduce((a,r)=>a+r.tot,0))}</td><td colSpan="2"></td></tr></tfoot>`}</table>${!tr.length&&html`<p class="p-3 text-sm text-mute">Nenhum pneu cadastrado.</p>`}</div></section>
+
+ <section class="rounded-md border border-line bg-panel p-4"><div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-head text-xl font-semibold">Histórico do período</h3><${Btn} sm=${1} on=${()=>copy(csvH(),'CSV do histórico')}>Copiar CSV<//></div>
+  <div class="mt-3 overflow-x-auto"><table class="tbl w-full whitespace-nowrap text-sm"><thead><tr>${['Data','Tipo','Motivo','Pneu','Veículo e posição','Km / horímetro','Valor unit. do pneu','Custo do evento'].map(h=>html`<th key=${h} class="px-3 py-2 text-left font-medium">${h}</th>`)}</tr></thead><tbody>
+  ${sortH(H).slice(0,50).map(h=>html`<tr key=${h.id} class="border-t border-line"><td class="px-3 py-2">${fmtD(h.date)}</td><td class="px-3 py-2 font-semibold">${h.type}</td><td class="px-3 py-2">${h.reason}</td><td class="px-3 py-2">${h.tireId}${h.tireOut?' / '+h.tireOut:''}</td><td class="px-3 py-2">${h.plate} · ${h.pos||'—'}</td><td class="px-3 py-2 tabular-nums">${mv(s,h.plate,h.km)}</td><td class="px-3 py-2 tabular-nums">${brlU(unitOf(s,h))}</td><td class="px-3 py-2 tabular-nums">${brl(h.cost)}</td></tr>`)}
+  </tbody><tfoot><tr class="border-t border-line font-semibold"><td class="px-3 py-2" colSpan="7">Custo total do período</td><td class="px-3 py-2 tabular-nums">${brl(sum(H))}</td></tr></tfoot></table>${!H.length&&html`<p class="p-3 text-sm text-mute">Nenhum registro no período.</p>`}</div>
+  ${H.length>50&&html`<p class="mt-2 text-xs text-mute">Mostrando os 50 mais recentes de ${H.length}. O CSV traz todos.</p>`}</section>
+ ${msg&&html`<p class="text-sm" role="status">${msg}</p>`}
+ ${box&&html`<textarea readOnly class=${IN+' h-40 font-mono text-xs'} value=${box} onFocus=${e=>e.target.select()}></textarea>`}
+ </div>`}
+
+function Search({s,onVeh,onTire}){
+ const [q,setQ]=useState('');
+ const nz=x=>String(x==null?'':x).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[\s\-\/.]/g,'');
+ const k=nz(q);
+ const vs=k?s.vehicles.filter(v=>[v.plate,v.model].some(f=>nz(f).includes(k))):[];
+ const ts=k?s.tires.filter(t=>[t.id,t.brand,t.model,t.size,t.dot,t.plate,t.pos,CONDL[t.cond],ST[t.status]].some(f=>f&&nz(f).includes(k))):[];
+ return html`<div class="relative w-full sm:w-72">
+  <input class="w-full rounded-md border border-line bg-bg px-3 py-1.5 pr-8 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent" placeholder="Buscar veículo ou pneu" aria-label="Buscar veículo ou pneu" value=${q} onChange=${e=>setQ(e.target.value)} onKeyDown=${e=>{if(e.key==='Escape')setQ('')}}/>
+  ${q&&html`<button class="absolute right-2 top-1.5 text-mute" aria-label="Limpar busca" onClick=${()=>setQ('')}>✕</button>`}
+  ${k&&html`<div class="absolute right-0 top-full z-30 mt-1 max-h-96 w-[min(92vw,26rem)] overflow-auto rounded-md border border-line bg-panel p-2 shadow-lg">
+   ${!vs.length&&!ts.length&&html`<p class="p-2 text-sm text-mute">Nada encontrado. Busque por placa, modelo, número de fogo, marca, medida ou DOT.</p>`}
+   ${vs.length>0&&html`<div class="px-2 pt-1 text-xs text-mute">Veículos</div>`}
+   ${vs.slice(0,6).map(v=>html`<button key=${v.plate} class="block w-full rounded px-2 py-2 text-left text-sm hover:bg-bg" onClick=${()=>{onVeh(v.plate);setQ('')}}><b>${v.plate}</b> · ${v.model}<div class="text-xs text-mute">${mv(s,v.plate,v.km)} · ${s.tires.filter(t=>t.status==='uso'&&t.plate===v.plate).length} pneus instalados</div></button>`)}
+   ${ts.length>0&&html`<div class="px-2 pt-2 text-xs text-mute">Pneus</div>`}
+   ${ts.slice(0,8).map(t=>html`<div key=${t.id} class="flex items-center gap-2 rounded px-2 py-1 hover:bg-bg"><button class="flex-1 min-w-0 py-1 text-left text-sm" onClick=${()=>{onTire(t);setQ('')}}><b>${t.id}</b> · ${t.brand} ${t.model}<div class="truncate text-xs text-mute">${t.size} · ${ST[t.status]}${t.plate?' · '+t.plate+', '+t.pos:''}</div></button>${t.plate&&html`<${Btn} sm=${1} on=${()=>{onVeh(t.plate);setQ('')}}>Ver veículo<//>`}</div>`)}
+   ${(vs.length>6||ts.length>8)&&html`<p class="p-2 text-xs text-mute">Mostrando os primeiros resultados. Refine a busca para ver os demais.</p>`}
+  </div>`}</div>`}
+
+function appIcon(){const c=document.createElement('canvas');c.width=c.height=256;const g=c.getContext('2d');
+ g.fillStyle='#F2B705';g.beginPath();g.moveTo(56,0);g.lineTo(200,0);g.quadraticCurveTo(256,0,256,56);g.lineTo(256,200);g.quadraticCurveTo(256,256,200,256);g.lineTo(56,256);g.quadraticCurveTo(0,256,0,200);g.lineTo(0,56);g.quadraticCurveTo(0,0,56,0);g.closePath();g.fill();
+ g.lineWidth=46;g.strokeStyle='#16181B';g.beginPath();g.arc(128,128,80,0,Math.PI*2);g.stroke();
+ g.lineWidth=6;g.strokeStyle='#F2B705';g.setLineDash([5,17]);g.beginPath();g.arc(128,128,80,0,Math.PI*2);g.stroke();g.setLineDash([]);
+ g.lineWidth=12;g.strokeStyle='#16181B';g.beginPath();g.arc(128,128,28,0,Math.PI*2);g.stroke();g.fillStyle='#16181B';g.beginPath();g.arc(128,128,8,0,Math.PI*2);g.fill();
+ return c.toDataURL('image/png')}
+function App({init,sync,remote}={}){
+ const [s,setS]=useState(()=>init?migrate(JSON.parse(JSON.stringify(init))):load());const [tab,setTab]=useState('painel');const [m,setM]=useState(null);const [conf,setConf]=useState(false);const [desk,setDesk]=useState(null);const [inst,setInst]=useState('');const [sel,setSel]=useState('');const [dl,setDl]=useState(false);const [bk,setBk]=useState(null);const [bmsg,setBmsg]=useState('');
+ useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
+ const goVeh=pl=>{setSel(pl);setTab('aplic')};
+ const role=sync?sync.role:'administrador',ro=role==='consulta',adm=role==='administrador';const [note,setNote]=useState('');
+ const warn=t=>{setNote(t);clearTimeout(window.__nt);window.__nt=setTimeout(()=>setNote(''),4000)};
+ const WR=['tire','importxml','fuel','svc','vehicle','install','remove','swap','rotate','editinst','past'];
+ const setMg=v=>{if(ro&&v&&WR.includes(v.k)){warn('Seu perfil é somente consulta: não é possível lançar ou alterar dados.');return}setM(v)};
+ const skip=React.useRef(true);
+ useEffect(()=>{if(skip.current){skip.current=false;return}if(sync){sync.save(s)}else{try{localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}}},[s]);
+ useEffect(()=>{if(!remote)return;skip.current=true;setS(migrate(JSON.parse(JSON.stringify(remote.dados))))},[remote]);
+ useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('desktop').then(d=>{if(!ok||!d)return;setDesk(d);try{d.install.state().then(st=>{if(ok)setInst(st)},()=>{})}catch(e){}try{if(d.app&&d.app.dock)d.app.dock.setIcon(appIcon()).catch(()=>{})}catch(e){}},()=>{})}catch(e){}return()=>{ok=false}},[]);
+ const mut=fn=>{if(ro){warn('Seu perfil é somente consulta: não é possível lançar ou alterar dados.');return}setS(p=>{const n=JSON.parse(JSON.stringify(p));fn(n);return n})};
+ const close=()=>setM(null);
+ const exportBk=async()=>{try{await dl.save({filename:'backup-frota-'+today()+'.json',data:new Blob([JSON.stringify({app:'controle-pneus',versao:1,dados:s})],{type:'application/json'})});setBmsg('Backup salvo.')}catch(e){setBmsg(e&&e.code==='declined'?'Download cancelado.':'Não foi possível salvar o backup.')}};
+ const pickBk=e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(String(r.result)),d=j&&j.dados?j.dados:j;if(!d||!Array.isArray(d.vehicles)||!Array.isArray(d.tires))throw 0;setBk({d,name:f.name,v:d.vehicles.length,t:d.tires.length});setBmsg('')}catch(x){setBk(null);setBmsg('Arquivo inválido: use um backup gerado por este sistema.')}};r.onerror=()=>setBmsg('Não foi possível ler o arquivo.');r.readAsText(f)};
+ const tabs=[['painel','Painel','grid'],['pneus','Pneus','tire'],['frota','Frota','truck'],['aplic','Aplicação','axle'],['hist','Histórico','clock'],['fuel','Abastecimentos','fuel'],['serv','Serviços','wrench'],['rel','Relatórios','chart'],...(sync&&sync.role==='administrador'?[['usr','Usuários','users']]:[])];
+ const subs={usr:'Quem acessa o sistema e o que cada perfil pode fazer',painel:'Visão geral da frota',pneus:'Cadastro e situação de cada pneu',frota:'Veículos e equipamentos: posições, km e horímetro',aplic:'Eixos do veículo e substituição de pneus',hist:'Trocas, rodízios e registros anteriores',fuel:'Abastecimentos, km atualizado e média percorrida por veículo',serv:'Alinhamento, balanceamento, rodízio e manutenção por veículo',rel:'Trocas, custos e valores dos pneus em gráficos'};
+ const cur=tabs.find(t=>t[0]===tab);
+ const al=alertsOf(s).length;
+ useEffect(()=>{try{if(desk&&desk.app&&desk.app.dock)desk.app.dock.setBadge(al?String(al):'').catch(()=>{})}catch(e){}},[desk,al]);
+ const instalar=()=>{try{desk.install.request().then(r=>{if(r==='installed')setInst('installed')},()=>{})}catch(e){}};
+ const titles={fuel:m&&m.fuel?'Editar abastecimento':'Registrar abastecimento',svc:m&&m.svc?'Editar serviço':'Registrar serviço',importxml:'Importar pneus do Excel',tire:m&&m.t?'Editar pneu '+m.t.id:'Cadastrar pneu',vehicle:m&&m.kind==='equipamento'?'Novo equipamento':'Novo veículo',install:'Instalar pneu',remove:'Retirar pneu',swap:'Registrar troca',rotate:'Registrar rodízio',past:'Registrar evento anterior',vinfo:'Veículo '+(m&&m.plate||''),editinst:'Corrigir instalação',thist:m&&m.t?'Histórico do pneu '+m.t.id:''};
+ const hoje=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'});
+ return html`<div class="min-h-screen lg:flex font-body">${note&&html`<div class="fixed left-1/2 top-3 z-50 -translate-x-1/2 rounded-md border border-warn bg-panel px-4 py-2 text-sm shadow" role="alert">${note}</div>`}
+  <aside class="shrink-0 flex flex-col bg-[#131416] text-[#E6E8EB] lg:w-60 lg:h-screen lg:sticky lg:top-0">
+   <div class="flex items-center gap-3 px-4 py-3 lg:py-5 lg:border-b border-white/10">
+    <div class="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-accent" style=${{color:'#16181B'}}><${TireIcon} s=${28}/></div>
+    <div><div class="font-head text-xl font-semibold leading-none">Controle de pneus</div><div class="text-xs text-[#9AA1AB] mt-1">Gestão de frota</div></div></div>
+   <nav class="flex lg:flex-col gap-1 px-2 pb-2 lg:py-3 overflow-x-auto lg:overflow-visible" aria-label="Seções">${tabs.map(t=>html`<button key=${t[0]} onClick=${()=>setTab(t[0])} aria-current=${tab===t[0]?'page':undefined} class=${'flex items-center gap-3 rounded-md px-3 py-2 text-left font-medium whitespace-nowrap '+(tab===t[0]?'bg-accent text-onaccent':'text-[#C5CAD1] hover:bg-white/10')}><${Ico} n=${t[2]}/>${t[1]}</button>`)}</nav>
+   <div class="hidden lg:block mt-auto border-t border-white/10 p-4 text-xs text-[#9AA1AB]">${s.tires.length} pneus cadastrados<br/>${s.vehicles.length} veículos${inst==='available'&&html`<button type="button" onClick=${instalar} class="mt-3 block w-full rounded-md border border-accent px-3 py-2 text-left font-medium text-accent">Instalar como aplicativo</button>`}</div>
+  </aside>
+  <div class="flex-1 min-w-0">
+   <header class="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-panel px-4 lg:px-8 py-4">
+    <div><h1 class="font-head text-3xl font-semibold leading-none">${cur[1]}</h1><p class="mt-1 text-sm text-mute">${subs[tab]}</p></div>
+    <div class="flex flex-wrap items-center gap-3 text-sm"><${Search} s=${s} onVeh=${goVeh} onTire=${t=>setM({k:'thist',t})}/><button onClick=${()=>setTab('painel')} class=${'flex items-center gap-2 rounded-md border px-3 py-1.5 '+(al?'border-warn text-warn':'border-line text-mute')}><i class="inline-block h-2 w-2 rounded-full" style=${{background:al?'var(--warn)':'var(--ok)'}}></i>${al?al+(al===1?' alerta de troca':' alertas de troca'):'Sem alertas'}</button><span class="hidden sm:inline text-mute">${hoje}</span></div></header>
+   <main class="mx-auto w-full max-w-6xl px-4 lg:px-8 py-6">
+    ${tab==='painel'&&html`<${Dashboard} s=${s} go=${setTab} setM=${setMg}/>`}
+    ${tab==='painel'&&sync&&html`<${AcessosPainel} sync=${sync} go=${setTab}/>`}
+    ${tab==='pneus'&&html`<${Tires} s=${s} mut=${mut} setM=${setMg}/>`}
+    ${tab==='frota'&&html`<${Fleet} s=${s} setM=${setMg}/>`}
+    ${tab==='aplic'&&html`<${Aplicacao} key=${sel} s=${s} mut=${mut} setM=${setMg} initPlate=${sel}/>`}
+    ${tab==='hist'&&html`<${History} s=${s} mut=${mut} setM=${setMg}/>`}
+    ${tab==='fuel'&&html`<${Abastecimentos} s=${s} mut=${mut} setM=${setMg}/>`}
+    ${tab==='serv'&&html`<${Servicos} s=${s} mut=${mut} setM=${setMg}/>`}
+    ${tab==='rel'&&html`<${Relatorios} s=${s}/>`}
+    ${tab==='usr'&&adm&&sync&&html`<${Usuarios} sb=${sync.sb} me=${sync.email}/>`}
+    <footer class="mt-10 text-xs text-mute">${sync?'Dados salvos no Supabase e compartilhados com os usuários autorizados.':'Dados salvos neste navegador.'} ${dl&&html`<button class="underline mr-3" onClick=${exportBk}>Exportar backup</button>`}${adm&&html`<label class="underline cursor-pointer mr-3">Importar backup<input type="file" accept=".json,application/json" class="sr-only" onChange=${pickBk}/></label>`}${bmsg&&html`<span class="mr-3" role="status">${bmsg}</span>`}${bk&&html`<span class="mr-3">Substituir todos os dados atuais por ${bk.name} (${bk.v} veículos, ${bk.t} pneus)? <button class="underline text-bad" onClick=${()=>{setS(migrate(JSON.parse(JSON.stringify(bk.d))));setBk(null);setBmsg('Backup importado.')}}>Sim, substituir</button> <button class="underline" onClick=${()=>setBk(null)}>Cancelar</button></span>`}${!adm?'':conf?html`${sync?'Apagar os dados de TODOS os usuários?':'Apagar todos os pneus, veículos e histórico?'} <button class="underline text-bad" onClick=${()=>{setS(fresh());setConf(false)}}>Sim, apagar tudo</button> <button class="underline" onClick=${()=>setConf(false)}>Cancelar</button>`:html`<button class="underline" onClick=${()=>setConf(true)}>Apagar todos os dados</button>`}</footer>
+   </main></div>
+  ${m&&html`<${Modal} title=${titles[m.k]} close=${close} wide=${m.k==='vinfo'||m.k==='tire'||m.k==='importxml'}>
+   ${m.k==='tire'&&html`<${TireForm} init=${m.t} s=${s} mut=${mut} close=${close}/>`}
+   ${m.k==='importxml'&&html`<${ImportXml} s=${s} mut=${mut} close=${close}/>`}
+   ${m.k==='fuel'&&html`<${AbastForm} s=${s} mut=${mut} close=${close} init=${m.fuel} plate=${m.plate}/>`}
+   ${m.k==='svc'&&html`<${ServicoForm} s=${s} mut=${mut} close=${close} init=${m.svc} plate=${m.plate}/>`}
+   ${m.k==='vehicle'&&html`<${VehicleForm} s=${s} mut=${mut} close=${close} kind=${m.kind}/>`}
+   ${m.k==='install'&&(s.vehicles.length?html`<${InstallForm} s=${s} mut=${mut} close=${close} plate=${m.plate} pos=${m.pos}/>`:html`<p class="text-sm">Cadastre um veículo antes de instalar pneus.</p>`)}
+   ${m.k==='remove'&&html`<${RemoveForm} s=${s} mut=${mut} close=${close} tire=${m.tire}/>`}
+   ${m.k==='swap'&&html`<${SwapForm} s=${s} mut=${mut} close=${close} tire=${m.tire}/>`}
+   ${m.k==='rotate'&&html`<${RotateForm} s=${s} mut=${mut} close=${close} tire=${m.tire}/>`}
+   ${m.k==='editinst'&&html`<${EditInstForm} s=${s} mut=${mut} close=${close} tire=${m.tire}/>`}
+   ${m.k==='vinfo'&&html`<${VehInfo} s=${s} plate=${m.plate} close=${close} goVeh=${goVeh}/>`}
+   ${m.k==='past'&&html`<${PastForm} s=${s} mut=${mut} close=${close} tire=${m.tire}/>`}
+   ${m.k==='thist'&&html`<${TireHist} s=${s} t=${m.t} setM=${setMg} close=${close}/>`}
+  <//>`}</div>`}
+
+const CFG=window.FROTA_CONFIG||{};
+const sb=(CFG.url&&CFG.key&&window.supabase&&!/COLE_AQUI/.test(CFG.url+CFG.key))?window.supabase.createClient(CFG.url,CFG.key):null;
+const BX='rounded-md border border-line bg-panel p-6';
+const PERF={administrador:'Administrador',operador:'Operador',consulta:'Consulta'};
+const PDESC={administrador:'Tudo, inclusive gerenciar usuários, importar backup e apagar todos os dados.',operador:'Lança e edita cadastros, instalações, trocas, serviços e abastecimentos.',consulta:'Só visualiza painel, listas, relatórios e exporta arquivos. Não altera nada.'};
+function Msg({t,children}){return html`<div class="min-h-screen grid place-items-center p-4 font-body"><div class=${BX+' w-full max-w-md'}><div class="font-head text-2xl font-semibold mb-2">${t}</div>${children}</div></div>`}
+function Login(){
+ const [modo,setModo]=useState('entrar');const [em,setEm]=useState('');const [pw,setPw]=useState('');const [pw2,setPw2]=useState('');const [err,setE]=useState('');const [ok,setOk]=useState('');const [busy,setB]=useState(false);
+ const criar=modo==='criar';
+ const go=async e=>{e.preventDefault();if(busy)return;setE('');setOk('');
+  if(criar){if(pw.length<8)return setE('A senha precisa ter pelo menos 8 caracteres.');if(pw!==pw2)return setE('As senhas não conferem.')}
+  setB(true);let r;
+  try{r=criar?await sb.auth.signUp({email:em.trim(),password:pw}):await sb.auth.signInWithPassword({email:em.trim(),password:pw})}catch(x){r={error:x}}
+  setB(false);
+  if(r.error){const m=r.error.message||'';return setE(/invalid login/i.test(m)?'E-mail ou senha incorretos.':/already|registered/i.test(m)?'Este e-mail já tem conta. Use "Entrar".':/not confirmed/i.test(m)?'Confirme o e-mail enviado pelo sistema e tente de novo.':'Não foi possível continuar: '+(m||'erro de conexão'))}
+  if(criar&&!(r.data&&r.data.session))setOk('Conta criada. Se o sistema enviou um e-mail de confirmação, abra-o e depois volte para entrar.')};
+ return html`<div class="min-h-screen grid place-items-center p-4 font-body"><form onSubmit=${go} class=${BX+' w-full max-w-sm'}>
+  <div class="flex items-center gap-3 mb-4"><div class="grid h-10 w-10 place-items-center rounded-md bg-accent" style=${{color:'#16181B'}}><${TireIcon} s=${28}/></div><div class="font-head text-2xl font-semibold leading-none">Controle de pneus</div></div>
+  <div class="mb-3 text-sm font-medium">${criar?'Primeiro acesso: criar a minha senha':'Entrar'}</div>
+  <label class="block text-sm font-medium">E-mail<input type="email" autocomplete="username" class=${IN} value=${em} onChange=${e=>setEm(e.target.value)}/></label>
+  <label class="mt-3 block text-sm font-medium">Senha<input type="password" autocomplete=${criar?'new-password':'current-password'} class=${IN} value=${pw} onChange=${e=>setPw(e.target.value)}/></label>
+  ${criar&&html`<label class="mt-3 block text-sm font-medium">Repita a senha<input type="password" autocomplete="new-password" class=${IN} value=${pw2} onChange=${e=>setPw2(e.target.value)}/></label>`}
+  ${err&&html`<p class="mt-3 text-sm text-bad" role="alert">${err}</p>`}${ok&&html`<p class="mt-3 text-sm" role="status">${ok}</p>`}
+  <button type="submit" disabled=${busy} class="mt-4 w-full rounded-md bg-brand px-4 py-2 font-medium text-onbrand disabled:opacity-60">${busy?'Aguarde…':criar?'Criar conta':'Entrar'}</button>
+  <button type="button" class="mt-3 text-sm underline" onClick=${()=>{setModo(criar?'entrar':'criar');setE('');setOk('')}}>${criar?'Já tenho conta: entrar':'Primeiro acesso? Criar conta'}</button>
+  <p class="mt-3 text-xs text-mute">Só entram pessoas autorizadas por um administrador. Use o e-mail que o administrador cadastrou.</p></form></div>`}
+function Usuarios({sb,me}){
+ const [rows,setRows]=useState(null);const [err,setErr]=useState('');const [msg,setMsg]=useState('');const [busy,setBusy]=useState(false);const [cd,setCd]=useState('');
+ const [f,setF]=useState({nome:'',email:'',perfil:'operador'});
+ const load=async()=>{const r=await sb.from('usuarios_autorizados').select('email,nome,perfil,ativo').order('nome',{ascending:true});if(r.error)return setErr('Não foi possível carregar: '+r.error.message);setRows(r.data||[])};
+ useEffect(()=>{load()},[]);
+ const run=async(p,okMsg)=>{setBusy(true);setMsg('');let r;try{r=await p}catch(e){r={error:e}}setBusy(false);
+  if(r.error){const m=r.error.message||'';setErr(/ao menos um administrador/i.test(m)?'Deve existir ao menos um administrador ativo.':/duplicate|unique/i.test(m)?'Esse e-mail já está cadastrado.':/row-level|permission/i.test(m)?'Você não tem permissão para isso.':'Não foi possível salvar: '+m);return false}
+  setErr('');setMsg(okMsg);await load();return true};
+ const add=async e=>{e.preventDefault();const em=f.email.trim().toLowerCase();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em))return setErr('Informe um e-mail válido.');if(!f.nome.trim())return setErr('Informe o nome.');
+  if(await run(sb.from('usuarios_autorizados').insert({email:em,nome:f.nome.trim(),perfil:f.perfil}),'Usuário incluído. Peça para ele abrir o sistema e clicar em "Primeiro acesso? Criar conta", usando este e-mail.'))setF({nome:'',email:'',perfil:'operador'})};
+ const upd=(email,patch)=>run(sb.from('usuarios_autorizados').update(patch).eq('email',email),'Alteração salva.');
+ const del=async email=>{setCd('');await run(sb.from('usuarios_autorizados').delete().eq('email',email),'Usuário removido do sistema.')};
+ const mine=(me||'').toLowerCase();
+ return html`<div class="grid gap-5">
+  <div class="grid gap-3 md:grid-cols-3">${Object.keys(PERF).map(k=>html`<div key=${k} class="rounded-md border border-line bg-panel p-4"><div class="font-head text-xl font-semibold">${PERF[k]}</div><p class="mt-1 text-sm text-mute">${PDESC[k]}</p></div>`)}</div>
+  <form onSubmit=${add} class="rounded-lg border border-line bg-panel p-4"><div class="font-head text-xl font-semibold mb-3">Autorizar novo usuário</div>
+   <div class="grid gap-3 md:grid-cols-4 items-end">
+    <label class="text-sm font-medium">Nome<input class=${IN} value=${f.nome} onChange=${e=>setF({...f,nome:e.target.value})}/></label>
+    <label class="text-sm font-medium">E-mail<input type="email" class=${IN} value=${f.email} onChange=${e=>setF({...f,email:e.target.value})}/></label>
+    <label class="text-sm font-medium">Perfil<select class=${IN} value=${f.perfil} onChange=${e=>setF({...f,perfil:e.target.value})}>${Object.keys(PERF).map(k=>html`<option key=${k} value=${k}>${PERF[k]}</option>`)}</select></label>
+    <button type="submit" disabled=${busy} class="rounded-md bg-brand px-4 py-2 font-medium text-onbrand disabled:opacity-60">Autorizar</button></div>
+   ${err&&html`<p class="mt-3 text-sm text-bad" role="alert">${err}</p>`}${msg&&html`<p class="mt-3 text-sm" role="status">${msg}</p>`}</form>
+  <div class="overflow-x-auto rounded-lg border border-line bg-panel"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Nome','E-mail','Perfil','Ativo',''].map(c=>html`<th key=${c} class="font-medium px-3 py-2">${c}</th>`)}</tr></thead><tbody>
+   ${(rows||[]).map(u=>{const eu=u.email===mine;return html`<tr key=${u.email} class="border-t border-line"><td class="px-3 py-2 font-semibold">${u.nome||'—'}${eu&&html` <span class="ml-1 rounded border border-line px-1.5 text-xs font-normal text-mute">você</span>`}</td><td class="px-3 py-2">${u.email}</td>
+    <td class="px-3 py-2"><select aria-label=${'Perfil de '+u.email} disabled=${busy||eu} class=${IN+' !mt-0 !py-1'} value=${u.perfil} onChange=${e=>upd(u.email,{perfil:e.target.value})}>${Object.keys(PERF).map(k=>html`<option key=${k} value=${k}>${PERF[k]}</option>`)}</select></td>
+    <td class="px-3 py-2"><input type="checkbox" aria-label=${'Ativo: '+u.email} disabled=${busy||eu} checked=${u.ativo} onChange=${e=>upd(u.email,{ativo:e.target.checked})}/></td>
+    <td class="px-3 py-2 text-right">${eu?'':cd===u.email?html`Remover? <button class="underline text-bad" onClick=${()=>del(u.email)}>Sim</button> <button class="underline" onClick=${()=>setCd('')}>Não</button>`:html`<button class="underline" onClick=${()=>setCd(u.email)}>Remover</button>`}</td></tr>`})}
+  </tbody></table>${rows&&!rows.length&&html`<p class="p-4 text-sm text-mute">Nenhum usuário cadastrado.</p>`}${!rows&&html`<p class="p-4 text-sm text-mute">Carregando…</p>`}</div>
+  <p class="text-sm text-mute">Desativar bloqueia o acesso sem apagar o usuário. A senha de cada pessoa é criada por ela mesma no primeiro acesso; para redefinir uma senha, use Authentication → Users no painel do Supabase.</p></div>`}
+function AcessosPainel({sync,go}){
+ const adm=sync.role==='administrador';const [rows,setRows]=useState(null);const [err,setErr]=useState('');
+ useEffect(()=>{let ok=true;(async()=>{try{const r=await sync.sb.from('usuarios_autorizados').select('email,nome,perfil,ativo').order('nome',{ascending:true});if(!ok)return;if(r.error)return setErr('Não foi possível carregar os usuários.');setRows(r.data||[])}catch(e){if(ok)setErr('Não foi possível carregar os usuários.')}})();return()=>{ok=false}},[]);
+ const mine=(sync.email||'').toLowerCase();
+ const list=(rows||[]).filter(u=>adm||u.email===mine);
+ const BD={administrador:'border-brand text-brand',operador:'border-line text-ink',consulta:'border-line text-mute'};
+ const n=k=>list.filter(u=>u.perfil===k&&u.ativo).length;
+ return html`<div class="mt-8 border-t border-line pt-5"><div class="mb-3 flex flex-wrap items-end justify-between gap-2"><div><div class="font-head text-2xl font-semibold">Logins e usuários</div>
+  <p class="text-sm text-mute">${adm?(rows?n('administrador')+' administrador(es), '+n('operador')+' operador(es) e '+n('consulta')+' de consulta ativos.':'Carregando…'):'Seu acesso a este sistema.'}</p></div>
+  ${adm&&html`<${Btn} on=${()=>go('usr')}>Gerenciar usuários<//>`}</div>
+  ${err?html`<p class="text-sm text-bad" role="alert">${err}</p>`:html`<div class="overflow-x-auto rounded-lg border border-line bg-panel"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Nome','E-mail','Perfil','Situação','Permissões'].map(c=>html`<th key=${c} class="font-medium px-3 py-2">${c}</th>`)}</tr></thead><tbody>
+   ${list.map(u=>html`<tr key=${u.email} class="border-t border-line"><td class="px-3 py-2 font-semibold">${u.nome||'—'}${u.email===mine&&html` <span class="ml-1 rounded border border-line px-1.5 text-xs font-normal text-mute">você</span>`}</td><td class="px-3 py-2">${u.email}</td>
+    <td class="px-3 py-2"><span class=${'rounded border px-2 py-0.5 text-xs font-medium '+(BD[u.perfil]||'')}>${PERF[u.perfil]||u.perfil}</span></td>
+    <td class="px-3 py-2"><span class="inline-flex items-center gap-2"><i class="inline-block h-2 w-2 rounded-full" style=${{background:u.ativo?'var(--ok)':'var(--bad)'}}></i>${u.ativo?'Ativo':'Desativado'}</span></td>
+    <td class="px-3 py-2 text-mute">${PDESC[u.perfil]||''}</td></tr>`)}
+  </tbody></table>${rows&&!list.length&&html`<p class="p-4 text-sm text-mute">Nenhum usuário encontrado.</p>`}${!rows&&html`<p class="p-4 text-sm text-mute">Carregando…</p>`}</div>`}</div>`}
+function Root(){
+ const [sess,setSess]=useState(undefined);const [rec,setRec]=useState(null);const [me,setMe]=useState(null);const [err,setErr]=useState('');const [st,setSt]=useState('');const [remote,setRemote]=useState(null);
+ const ver=React.useRef(0),timer=React.useRef(null),pend=React.useRef(null),busy=React.useRef(false),conf=React.useRef(false),fl=React.useRef(null),mail=React.useRef(''),role=React.useRef('');
+ useEffect(()=>{if(!sb)return;let ok=true;sb.auth.getSession().then(({data})=>{if(ok)setSess(data.session||null)},()=>{if(ok)setSess(null)});
+  const r=sb.auth.onAuthStateChange((_e,x)=>{if(ok)setSess(x||null)});return()=>{ok=false;try{r.data.subscription.unsubscribe()}catch(e){}}},[]);
+ const uid=sess&&sess.user?sess.user.id:null;mail.current=sess&&sess.user?(sess.user.email||''):'';
+ useEffect(()=>{setRec(null);setMe(null);setErr('');pend.current=null;conf.current=false;role.current='';if(!sb||!uid)return;let ok=true;
+  (async()=>{
+   const m=await sb.from('usuarios_autorizados').select('nome,perfil,ativo').eq('email',mail.current.toLowerCase()).maybeSingle();if(!ok)return;
+   if(m.error)return setErr('Não foi possível verificar o seu acesso: '+m.error.message);
+   if(!m.data)return setErr('O e-mail '+mail.current+' não está autorizado. Peça a um administrador para incluí-lo na aba Usuários.');
+   if(!m.data.ativo)return setErr('O seu acesso está desativado. Fale com um administrador.');
+   const r=await sb.from('estado_frota').select('dados,versao').eq('id',1).maybeSingle();if(!ok)return;
+   if(r.error)return setErr('Não foi possível carregar os dados: '+r.error.message);
+   if(!r.data)return setErr('Sem acesso aos dados. Confirme que o script SQL foi executado.');
+   role.current=m.data.perfil;ver.current=r.data.versao;setMe(m.data);setRec(r.data);setSt('salvo')})().catch(()=>{if(ok)setErr('Sem conexão com o Supabase.')});
+  return()=>{ok=false}},[uid]);
+ const flush=async()=>{if(busy.current||!pend.current||conf.current||role.current==='consulta')return;busy.current=true;const d=pend.current;pend.current=null;setSt('salvando');let r;
+  try{r=await sb.from('estado_frota').update({dados:d,versao:ver.current+1,atualizado_por:mail.current,atualizado_em:new Date().toISOString()}).eq('id',1).eq('versao',ver.current).select('versao')}catch(e){r={error:e}}
+  busy.current=false;
+  if(r.error){pend.current=pend.current||d;setSt('erro');clearTimeout(timer.current);timer.current=setTimeout(()=>fl.current(),5000);return}
+  if(!r.data||!r.data.length){
+   let e2;try{e2=await sb.from('usuarios_autorizados').select('perfil,ativo').eq('email',mail.current.toLowerCase()).maybeSingle()}catch(e){e2={}}
+   if(e2.data&&(!e2.data.ativo||e2.data.perfil==='consulta')){role.current='consulta';pend.current=null;await pull(false);setSt('semperm');return}
+   pend.current=pend.current||d;conf.current=true;setSt('conflito');return}
+  ver.current=r.data[0].versao;if(pend.current){setSt('pendente');timer.current=setTimeout(()=>fl.current(),300)}else setSt('salvo')};
+ fl.current=flush;
+ const sync={role:me?me.perfil:'consulta',sb,email:mail.current,nome:me?me.nome:'',save:d=>{if(role.current==='consulta')return;pend.current=d;if(conf.current)return;setSt('pendente');clearTimeout(timer.current);timer.current=setTimeout(()=>fl.current(),800)}};
+ const pull=async keep=>{const {data,error}=await sb.from('estado_frota').select('dados,versao').eq('id',1).maybeSingle();if(error||!data)return setSt('erro');
+  ver.current=data.versao;conf.current=false;
+  if(keep){setSt('pendente');fl.current()}else{pend.current=null;setRemote({dados:data.dados,tick:Date.now()});setSt('salvo')}};
+ useEffect(()=>{if(!sb||!uid||!rec)return;const t=setInterval(async()=>{if(pend.current||busy.current||conf.current)return;
+   try{const {data}=await sb.from('estado_frota').select('versao').eq('id',1).maybeSingle();if(data&&data.versao>ver.current){const r=await sb.from('estado_frota').select('dados,versao').eq('id',1).maybeSingle();
+    if(r.data&&!pend.current&&!busy.current&&!conf.current&&r.data.versao>ver.current){ver.current=r.data.versao;setRemote({dados:r.data.dados,tick:Date.now()});setSt('salvo')}}}catch(e){}},15000);return()=>clearInterval(t)},[uid,!!rec]);
+ useEffect(()=>{const f=e=>{if(pend.current||busy.current){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',f);return()=>window.removeEventListener('beforeunload',f)},[]);
+ const sair=()=>{try{sb.auth.signOut()}catch(e){}};
+ if(!sb)return html`<${Msg} t="Falta configurar o Supabase"><p class="text-sm">Abra este arquivo em um editor de texto e troque <b>COLE_AQUI_A_PROJECT_URL</b> e <b>COLE_AQUI_A_CHAVE_PUBLICA</b> no início do arquivo (bloco FROTA_CONFIG). Se já trocou, verifique a conexão com a internet.</p><//>`;
+ if(sess===undefined)return html`<${Msg} t="Carregando…"><//>`;
+ if(!sess)return html`<${Login}/>`;
+ if(err)return html`<${Msg} t="Não foi possível abrir"><p class="text-sm">${err}</p><button class="mt-4 underline text-sm" onClick=${sair}>Sair</button><//>`;
+ if(!rec||!me)return html`<${Msg} t="Carregando dados…"><//>`;
+ const LBL={salvo:'Salvo no Supabase',pendente:'Alterações pendentes…',salvando:'Salvando…',erro:'Erro ao salvar. Tentando de novo…',conflito:'Conflito: outra pessoa salvou antes',semperm:'Sem permissão para salvar: dados recarregados'};
+ const d=rec.dados&&Array.isArray(rec.dados.vehicles)&&Array.isArray(rec.dados.tires)?rec.dados:null;
+ return html`${st==='conflito'&&html`<div class="fixed inset-x-0 top-0 z-50 border-b border-warn bg-panel p-3 text-sm text-center" role="alert">Outra pessoa salvou alterações antes de você. <button class="underline font-medium mx-2" onClick=${()=>pull(false)}>Carregar os dados do servidor (descarta as suas alterações não salvas)</button> <button class="underline font-medium" onClick=${()=>pull(true)}>Manter as minhas alterações</button></div>`}
+  <${App} init=${d||fresh()} remote=${remote} sync=${sync}/>
+  <div class="fixed bottom-2 right-2 z-40 flex items-center gap-3 rounded-md border border-line bg-panel px-3 py-1.5 text-xs shadow" role="status"><span class=${st==='erro'||st==='conflito'||st==='semperm'?'text-bad':'text-mute'}>${LBL[st]||''}</span><span class="text-mute">${me.nome||sess.user.email} · ${PERF[me.perfil]}</span><button class="underline" onClick=${sair}>Sair</button></div>`}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${Root}/>`);
+</script>
+</body>
+</html>
