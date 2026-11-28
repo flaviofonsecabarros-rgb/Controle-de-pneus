@@ -35,6 +35,12 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-off
 :root[data-theme="dark"] .viz{--s1:#338ced;--s2:#e76624;--s3:#00a888;--s4:#d28e05;--axis:#474747}
 .tire-s{border:2px solid #14532D;border-radius:5px;background:repeating-linear-gradient(180deg,#2E9E5B 0 3px,#1F7A45 3px 5px)}
 .tire-s.empty{background:transparent;border:1.5px dashed var(--mute)}
+.keycap{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;padding:6px 6px 5px;border-radius:9px;background:linear-gradient(#41464d,#2b2f34);color:#ECEEF0;border:1px solid #17191c;border-bottom-width:5px;box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 2px 3px rgba(0,0,0,.55);font-size:12px;font-weight:700;line-height:1.15;text-align:center;overflow-wrap:anywhere;cursor:pointer;transition:transform .06s,border-bottom-width .06s}
+.keycap small{font-size:10px;font-weight:500;opacity:.7}
+.keycap:hover{background:linear-gradient(#4b5159,#33383e)}
+.keycap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.keycap:active,.keycap[aria-pressed=true]{transform:translateY(3px);border-bottom-width:2px;box-shadow:inset 0 2px 4px rgba(0,0,0,.45)}
+.keycap[aria-pressed=true]{background:linear-gradient(#FFD23F,#E0A800);color:#16181B;border-color:#8A6A00}
 </style>
 </head>
 <body>
@@ -1251,13 +1257,14 @@ async function exportObraXlsx(s,id,perTxt,D,rows,log){
  return {filename:'custos-'+nm.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-'+fileStamp()+'.xlsx',data:new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})};
 }
 
-function Obras({s,mut}){
+function Obras({s,mut,initSel,onSel}){
  const first=ccAll(s)[0];
- const [sel,setSel]=useState(first?first.id:'');const [mo,setMo]=useState(null);
+ const [sel,setSel]=useState(initSel!=null?initSel:(first?first.id:''));const [mo,setMo]=useState(null);
  const [per,setPer]=useState('all');const [de,setDe]=useState('');const [ate,setAte]=useState('');
  const [dl,setDl]=useState(null);const [busy,setBusy]=useState(false);const [msg,setMsg]=useState('');const [delA,setDelA]=useState(null);const [delC,setDelC]=useState(false);
  useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
  const cur=ccAll(s).find(c=>c.id===sel),id=cur?sel:'';
+ useEffect(()=>{if(onSel)onSel(id)},[id]);
  const semUn=s.vehicles.filter(v=>ccNow(s,v.plate)==='');
  const from=per==='all'?'':per==='custom'?de:new Date(Date.now()-(+per)*864e5).toISOString().slice(0,10),to=per==='custom'?ate:'';
  const perTxt=per==='all'?'Todo o período':per==='custom'?(de?fmtD(de):'início')+' a '+(ate?fmtD(ate):'hoje'):'Últimos '+per+' dias';
@@ -1537,7 +1544,7 @@ function appIcon(){const c=document.createElement('canvas');c.width=c.height=256
  g.lineWidth=12;g.strokeStyle='#16181B';g.beginPath();g.arc(128,128,28,0,Math.PI*2);g.stroke();g.fillStyle='#16181B';g.beginPath();g.arc(128,128,8,0,Math.PI*2);g.fill();
  return c.toDataURL('image/png')}
 function App({init,sync,remote}={}){
- const [s,setS]=useState(()=>init?migrate(JSON.parse(JSON.stringify(init))):load());const [tab,setTab]=useState('painel');const [m,setM]=useState(null);const [conf,setConf]=useState(false);const [desk,setDesk]=useState(null);const [inst,setInst]=useState('');const [sel,setSel]=useState('');const [dl,setDl]=useState(false);const [bk,setBk]=useState(null);const [bmsg,setBmsg]=useState('');
+ const [s,setS]=useState(()=>init?migrate(JSON.parse(JSON.stringify(init))):load());const [tab,setTab]=useState('painel');const [ccPick,setCcPick]=useState({n:0,id:null});const [ccCur,setCcCur]=useState(null);const [m,setM]=useState(null);const [conf,setConf]=useState(false);const [desk,setDesk]=useState(null);const [inst,setInst]=useState('');const [sel,setSel]=useState('');const [dl,setDl]=useState(false);const [bk,setBk]=useState(null);const [bmsg,setBmsg]=useState('');
  useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
  const goVeh=pl=>{setSel(pl);setTab('aplic')};
  const role=sync?sync.role:'administrador',ro=role==='consulta',adm=role==='administrador';const [note,setNote]=useState('');
@@ -1566,6 +1573,8 @@ function App({init,sync,remote}={}){
     <div class="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-accent" style=${{color:'#16181B'}}><${TireIcon} s=${28}/></div>
     <div><div class="font-head text-xl font-semibold leading-none">Controle de pneus</div><div class="text-xs text-[#9AA1AB] mt-1">Gestão de frota</div></div></div>
    <nav class="flex lg:flex-col gap-1 px-2 pb-2 lg:py-3 overflow-x-auto lg:overflow-visible" aria-label="Seções">${tabs.map(t=>html`<button key=${t[0]} onClick=${()=>setTab(t[0])} aria-current=${tab===t[0]?'page':undefined} class=${'flex items-center gap-3 rounded-md px-3 py-2 text-left font-medium whitespace-nowrap '+(tab===t[0]?'bg-accent text-onaccent':'text-[#C5CAD1] hover:bg-white/10')}><${Ico} n=${t[2]}/>${t[1]}</button>`)}</nav>
+   ${(s.cc||[]).length>0&&html`<div class="px-3 pb-3 lg:pt-2" aria-label="Centros de custo"><div class="mb-2 hidden text-[11px] font-semibold uppercase tracking-wider text-[#9AA1AB] lg:block">Centros de custo</div>
+    <div class="flex gap-2 overflow-x-auto pb-1 lg:grid lg:grid-cols-2 lg:overflow-visible lg:pb-0">${[...s.cc,...(s.vehicles.some(v=>ccNow(s,v.plate)==='')?[{id:'',name:'SEM CENTRO'}]:[])].map(c=>{const n=s.vehicles.filter(v=>ccNow(s,v.plate)===c.id).length;return html`<button type="button" key=${c.id||'sem'} class="keycap w-24 shrink-0 lg:w-auto" aria-pressed=${tab==='obras'&&ccCur===c.id} title=${c.name+' · '+n+(n===1?' unidade':' unidades')} onClick=${()=>{setCcPick(p=>({n:p.n+1,id:c.id}));setTab('obras')}}>${c.name}<small>${n} ${n===1?'unidade':'unidades'}</small></button>`})}</div></div>`}
    <div class="hidden lg:block mt-auto border-t border-white/10 p-4 text-xs text-[#9AA1AB]">${s.tires.length} pneus cadastrados<br/>${s.vehicles.length} veículos${inst==='available'&&html`<button type="button" onClick=${instalar} class="mt-3 block w-full rounded-md border border-accent px-3 py-2 text-left font-medium text-accent">Instalar como aplicativo</button>`}</div>
   </aside>
   <div class="flex-1 min-w-0">
@@ -1582,7 +1591,7 @@ function App({init,sync,remote}={}){
     ${tab==='fuel'&&html`<${Abastecimentos} s=${s} mut=${mut} setM=${setMg}/>`}
     ${tab==='serv'&&html`<${Servicos} s=${s} mut=${mut} setM=${setMg}/>`}
     ${tab==='bi'&&html`<${Analise} s=${s}/>`}
-    ${tab==='obras'&&html`<${Obras} s=${s} mut=${mut}/>`}
+    ${tab==='obras'&&html`<${Obras} key=${ccPick.n} s=${s} mut=${mut} initSel=${ccPick.id} onSel=${setCcCur}/>`}
     ${tab==='rel'&&html`<${Relatorios} s=${s}/>`}
     ${tab==='usr'&&adm&&sync&&html`<${Usuarios} sb=${sync.sb} me=${sync.email}/>`}
     <footer class="mt-10 text-xs text-mute">${sync?'Dados salvos no Supabase e compartilhados com os usuários autorizados.':'Dados salvos neste navegador.'} ${dl&&html`<button class="underline mr-3" onClick=${exportBk}>Exportar backup</button>`}${adm&&html`<label class="underline cursor-pointer mr-3">Importar backup<input type="file" accept=".json,application/json" class="sr-only" onChange=${pickBk}/></label>`}${bmsg&&html`<span class="mr-3" role="status">${bmsg}</span>`}${bk&&html`<span class="mr-3">Substituir todos os dados atuais por ${bk.name} (${bk.v} veículos, ${bk.t} pneus)? <button class="underline text-bad" onClick=${()=>{setS(migrate(JSON.parse(JSON.stringify(bk.d))));setBk(null);setBmsg('Backup importado.')}}>Sim, substituir</button> <button class="underline" onClick=${()=>setBk(null)}>Cancelar</button></span>`}${!adm?'':conf?html`${sync?'Apagar os dados de TODOS os usuários?':'Apagar todos os pneus, veículos e histórico?'} <button class="underline text-bad" onClick=${()=>{setS(fresh());setConf(false)}}>Sim, apagar tudo</button> <button class="underline" onClick=${()=>setConf(false)}>Cancelar</button>`:html`<button class="underline" onClick=${()=>setConf(true)}>Apagar todos os dados</button>`}</footer>
