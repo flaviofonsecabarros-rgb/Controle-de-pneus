@@ -1209,6 +1209,29 @@ function TransfForm({s,mut,close,plates,to,onDone}){
   <p class="text-xs text-mute">Pode ser uma data passada. Os custos lançados antes da data ficam no centro de custo anterior e, a partir dela, passam automaticamente para o escolhido, até a próxima transferência da unidade.</p></div>
   <${Foot} err=${err} close=${close} ok=${sub} label="Transferir"/>`}
 
+const ccAtList=(L,d)=>{let r='';for(const a of L){if(a.date<=d)r=a.cc;else break}return r};
+function allocImpact(s,plate,nl){
+ const old=allocOf(s,plate),recs=[...(s.fuel||[]).filter(x=>x.plate===plate).map(x=>({d:x.date,v:x.value||0})),...(s.services||[]).filter(x=>x.plate===plate).map(x=>({d:x.date,v:x.value||0})),...(s.history||[]).filter(x=>x.plate===plate&&x.cost>0).map(x=>({d:x.date,v:x.cost}))];
+ const mv={};let n=0,v=0;
+ recs.forEach(r=>{const a=ccAtList(old,r.d),b=ccAtList(nl,r.d);if(a!==b){n++;v+=r.v;const k=a+'>'+b;mv[k]=mv[k]||{from:a,to:b,n:0,v:0};mv[k].n++;mv[k].v+=r.v}});
+ return{n,v,moves:Object.values(mv)}}
+function EditAllocForm({s,mut,close,a,onDone}){
+ const first=allocOf(s,a.plate)[0],isFirst=first&&first.id===a.id;
+ const [f,u,setF]=useF({to:a.cc,date:a.date||today(),start:a.date==='',note:a.note||''});const [err,setE]=useState('');
+ const dt=isFirst&&f.start?'':f.date;
+ const nl=allocOf(s,a.plate).map(x=>x.id===a.id?{...x,cc:f.to,date:dt,note:f.note}:x).sort((x,y)=>x.date.localeCompare(y.date)||x.id-y.id);
+ const imp=allocImpact(s,a.plate,nl);
+ const sub=()=>{if(!(isFirst&&f.start)&&!f.date)return setE('Informe a data da transferência.');
+  mut(n=>{const x=(n.alloc||[]).find(y=>y.id===a.id);if(x){x.cc=f.to;x.date=dt;x.note=f.note.trim()}});
+  onDone&&onDone(imp.n?'Transferência editada. '+imp.n+(imp.n===1?' lançamento':' lançamentos')+' ('+brl(imp.v)+') '+(imp.n===1?'foi reajustado':'foram reajustados')+' entre os centros de custo.':'Transferência editada. Nenhum lançamento mudou de centro de custo.');close()};
+ return html`<div class="grid gap-3"><div class="rounded-md border border-line bg-bg p-3 text-sm"><b>${a.plate}</b> · ${s.vehicles.some(v=>v.plate===a.plate)?(s.vehicles.find(v=>v.plate===a.plate).model):''}</div>
+  <${Fld} l="Transferido para"><${Sel} v=${f.to} on=${u('to')} opts=${[...ccAll(s).map(c=>[c.id,c.name+(c.code?' · '+c.code:'')]),['','Sem centro de custo']]}/><//>
+  ${isFirst&&f.start?null:html`<${Fld} l="A partir de qual data?"><${Inp} type="date" v=${f.date} on=${u('date')}/><//>`}
+  ${isFirst&&html`<label class="flex items-start gap-2 text-sm"><input type="checkbox" class="mt-1" checked=${f.start} onChange=${e=>setF(x=>({...x,start:e.target.checked}))}/><span>Vale desde o início (inclui os lançamentos mais antigos).</span></label>`}
+  <${Fld} l="Observação (opcional)"><${Inp} v=${f.note} on=${u('note')} ph="Motivo da transferência"/><//>
+  <div class=${'rounded-md border p-3 text-sm '+(imp.n?'border-warn':'border-line')} role="status">${imp.n?html`<b>Reajuste dos custos:</b> ${imp.n} ${imp.n===1?'lançamento':'lançamentos'} (${brl(imp.v)}) ${imp.n===1?'muda':'mudam'} de centro de custo ao salvar.<div class="mt-1 text-xs text-mute">${imp.moves.map(m=>html`<div key=${m.from+'>'+m.to}>${ccNm(s,m.from)} → ${ccNm(s,m.to)}: ${m.n} ${m.n===1?'lançamento':'lançamentos'}, ${brl(m.v)}</div>`)}</div>`:html`Nenhum lançamento muda de centro de custo com essa edição.`}</div></div>
+  <${Foot} err=${err} close=${close} ok=${sub} label="Salvar edição"/>`}
+
 async function exportObraXlsx(s,id,perTxt,D,rows,log){
  await loadLib(LIB_XLSX,'ExcelJS');
  const wb=new ExcelJS.Workbook();wb.creator='Controle de pneus';wb.created=new Date();
@@ -1283,9 +1306,10 @@ function Obras({s,mut}){
    ${rows.length>0&&html`<tr class="border-t-2 border-line font-semibold"><td class="px-3 py-2">Total</td><td class="px-3 py-2 tabular-nums">${brl(fv)}</td><td class="px-3 py-2 tabular-nums">${brl(sv)}</td><td class="px-3 py-2 tabular-nums">${brl(evv)}</td><td class="px-3 py-2 tabular-nums">${brl(total)}</td><td class="px-3 py-2 tabular-nums">${f1(lit)} L</td><td></td></tr>`}</tbody></table>${!rows.length&&html`<p class="p-3 text-sm text-mute">Nenhuma unidade com lançamentos ou alocada aqui.</p>`}</div></section>
   <section class="rounded-lg border border-line bg-panel p-4"><h3 class="font-head text-xl font-semibold">Transferências deste centro de custo</h3>
    ${log.length?html`<div class="mt-2">${log.map(a=>html`<div key=${a.id} class="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line py-2 text-sm first:border-0"><span class="w-28 tabular-nums text-mute">${a.date?fmtD(a.date):'Desde o início'}</span><b>${a.plate}</b><span>${a.cc===id?'entrou':'saiu'} · ${ccNm(s,a.from)} → ${ccNm(s,a.cc)}</span>${a.note&&html`<span class="text-mute">${a.note}</span>`}
-    <span class="ml-auto">${delA===a.id?html`Desfazer esta transferência? <button class="underline text-bad" onClick=${()=>{mut(n=>{n.alloc=(n.alloc||[]).filter(x=>x.id!==a.id)});setDelA(null)}}>Sim</button> <button class="underline" onClick=${()=>setDelA(null)}>Não</button>`:html`<button class="underline text-mute" onClick=${()=>setDelA(a.id)}>Desfazer</button>`}</span></div>`)}</div>`:html`<p class="mt-2 text-sm text-mute">Nenhuma transferência registrada.</p>`}</section>
-  ${mo&&html`<${Modal} title=${mo.k==='cc'?(mo.cc?'Editar centro de custo':'Novo centro de custo'):'Transferir unidades'} close=${()=>setMo(null)}>
+    <span class="ml-auto flex gap-3"><button class="underline text-mute" onClick=${()=>setMo({k:'alloc',a})}>Editar</button>${delA===a.id?html`Desfazer esta transferência? <button class="underline text-bad" onClick=${()=>{mut(n=>{n.alloc=(n.alloc||[]).filter(x=>x.id!==a.id)});setDelA(null)}}>Sim</button> <button class="underline" onClick=${()=>setDelA(null)}>Não</button>`:html`<button class="underline text-mute" onClick=${()=>setDelA(a.id)}>Desfazer</button>`}</span></div>`)}</div>`:html`<p class="mt-2 text-sm text-mute">Nenhuma transferência registrada.</p>`}</section>
+  ${mo&&html`<${Modal} title=${mo.k==='cc'?(mo.cc?'Editar centro de custo':'Novo centro de custo'):mo.k==='alloc'?'Editar transferência':'Transferir unidades'} close=${()=>setMo(null)}>
    ${mo.k==='cc'&&html`<${CcForm} s=${s} mut=${mut} close=${()=>setMo(null)} init=${mo.cc} onDone=${i=>setSel(i)}/>`}
+   ${mo.k==='alloc'&&html`<${EditAllocForm} s=${s} mut=${mut} close=${()=>setMo(null)} a=${mo.a} onDone=${t=>setMsg(t)}/>`}
    ${mo.k==='transf'&&html`<${TransfForm} s=${s} mut=${mut} close=${()=>setMo(null)} plates=${mo.plates} to=${mo.to} onDone=${i=>setSel(i)}/>`}<//>`}</div>`}
 
 const LIB_PDF='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',LIB_PDFW='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
