@@ -1138,15 +1138,18 @@ function TransfForm({s,mut,close,plates,to,onDone}){
  const [f,u,setF]=useF({sel:plates||[],to:to!=null?to:(cs[0]?cs[0].id:''),date:today(),start:false,note:''});const [err,setE]=useState('');
  const tg=p=>setF(x=>({...x,sel:x.sel.includes(p)?x.sel.filter(y=>y!==p):[...x.sel,p]}));
  const virgin=f.sel.length>0&&f.sel.every(p=>!allocOf(s,p).length),fromStart=f.start&&virgin;
+ const dt0=fromStart?'':f.date;
+ const imp=(()=>{let n=0,v=0,pl=0;f.sel.forEach(p=>{if(!dt0&&!fromStart)return;if(ccAt(s,p,dt0)===f.to)return;const nx=allocOf(s,p).find(a=>a.date>dt0),end=nx?nx.date:'9999-12-31';const inr=d=>d>=dt0&&d<end&&ccAt(s,p,d)!==f.to;
+   const a=(s.fuel||[]).filter(x=>x.plate===p&&inr(x.date)),b=(s.services||[]).filter(x=>x.plate===p&&inr(x.date)),c=(s.history||[]).filter(x=>x.plate===p&&x.cost>0&&inr(x.date));
+   const k=a.length+b.length+c.length;if(k){pl++;n+=k;v+=ccSum(a,x=>x.value)+ccSum(b,x=>x.value)+ccSum(c,x=>x.cost)}});return{n,v,pl}})();
  const sub=()=>{
   if(!cs.length)return setE('Crie um centro de custo antes de transferir.');
   if(!f.sel.length)return setE('Marque ao menos um veículo ou equipamento.');
   if(!fromStart&&!f.date)return setE('Informe a data da transferência.');
-  const bad=fromStart?null:f.sel.find(p=>{const l=allocOf(s,p).slice(-1)[0];return l&&f.date<l.date});
-  if(bad){const l=allocOf(s,bad).slice(-1)[0];return setE(bad+' já foi transferido em '+fmtD(l.date)+'. Use essa data ou uma posterior.')}
-  const moves=f.sel.filter(p=>ccNow(s,p)!==f.to);
+  const dt=fromStart?'':f.date;
+  const moves=f.sel.filter(p=>ccAt(s,p,dt)!==f.to);
   if(!moves.length)return setE('As unidades marcadas já estão nesse centro de custo.');
-  mut(n=>{n.alloc=n.alloc||[];let id=Math.max(0,...n.alloc.map(a=>a.id))+1;moves.forEach(p=>{n.alloc.push({id:id++,plate:p,cc:f.to,date:fromStart?'':f.date,note:f.note.trim()})})});
+  mut(n=>{n.alloc=n.alloc||[];let id=Math.max(0,...n.alloc.map(a=>a.id))+1;moves.forEach(p=>{n.alloc.push({id:id++,plate:p,cc:f.to,date:dt,note:f.note.trim()})})});
   onDone&&onDone(f.to);close()};
  return html`<div class="grid gap-3">
   <div><div class="text-sm text-mute">Veículos e equipamentos</div><div class="mt-1 max-h-52 overflow-auto rounded-md border border-line bg-bg p-2">${s.vehicles.length?s.vehicles.map(v=>html`<label key=${v.plate} class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-panel"><input type="checkbox" checked=${f.sel.includes(v.plate)} onChange=${()=>tg(v.plate)}/><b>${v.plate}</b><span class="text-mute">${v.model}${v.kind==='equipamento'?' · equip.':''} · hoje em ${ccNm(s,ccNow(s,v.plate))}</span></label>`):html`<p class="p-2 text-sm text-mute">Nenhum cadastro na Frota.</p>`}</div></div>
@@ -1154,7 +1157,8 @@ function TransfForm({s,mut,close,plates,to,onDone}){
   ${virgin&&f.start?null:html`<${Fld} l="A partir de qual data?"><${Inp} type="date" v=${f.date} on=${u('date')}/><//>`}
   ${virgin&&html`<label class="flex items-start gap-2 text-sm"><input type="checkbox" class="mt-1" checked=${f.start} onChange=${e=>setF(x=>({...x,start:e.target.checked}))}/><span>Vale desde o início. Os lançamentos antigos (abastecimentos, serviços e custos de pneus) passam a contar nesse centro de custo.</span></label>`}
   <${Fld} l="Observação (opcional)"><${Inp} v=${f.note} on=${u('note')} ph="Motivo da transferência"/><//>
-  <p class="text-xs text-mute">Os custos lançados antes da data ficam no centro de custo anterior. A partir da data, contam no novo.</p></div>
+  ${imp.n>0&&html`<div class="rounded-md border border-warn p-3 text-sm" role="status"><b>Transferência retroativa:</b> ${imp.n} ${imp.n===1?'lançamento':'lançamentos'} (${brl(imp.v)}) de ${imp.pl} ${imp.pl===1?'unidade':'unidades'} já feitos a partir de ${fromStart?'início':fmtD(f.date)} passam a contar em <b>${ccNm(s,f.to)}</b>, e saem do centro de custo em que estão hoje.</div>`}
+  <p class="text-xs text-mute">Pode ser uma data passada. Os custos lançados antes da data ficam no centro de custo anterior e, a partir dela, passam automaticamente para o escolhido, até a próxima transferência da unidade.</p></div>
   <${Foot} err=${err} close=${close} ok=${sub} label="Transferir"/>`}
 
 async function exportObraXlsx(s,id,perTxt,D,rows,log){
