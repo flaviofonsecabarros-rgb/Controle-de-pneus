@@ -755,17 +755,29 @@ function Tires({s,mut,setM}){
 
 function Fleet({s,setM}){
  const [plate,setP0]=useState(()=>FLEET_SEL&&s.vehicles.some(x=>x.plate===FLEET_SEL)?FLEET_SEL:(s.vehicles[0]?s.vehicles[0].plate:''));
- const setP=p=>{FLEET_SEL=p;setP0(p)};
+ const [open,setOpen]=useState(false);
+ const setP=p=>{FLEET_SEL=p;setP0(p);setOpen(true);try{window.scrollTo(0,0)}catch(e){}};
  const v=s.vehicles.find(x=>x.plate===plate)||s.vehicles.find(x=>x.plate===FLEET_SEL)||s.vehicles[0];
- return html`<div class="flex flex-wrap gap-2 mb-4">${s.vehicles.map(x=>html`<button key=${x.plate} onClick=${()=>setP(x.plate)} class=${'rounded-md px-4 py-2 font-medium '+(v&&v.plate===x.plate?'bg-brand text-onbrand':'border border-line')} title=${x.kind==='equipamento'?'Equipamento (horímetro)':'Veículo (km)'}>${x.plate}${x.kind==='equipamento'&&html` <span class="text-xs font-normal opacity-70">EQ</span>`}</button>`)}<${Btn} on=${()=>setM({k:'vehicle'})}>Novo veículo<//><${Btn} on=${()=>setM({k:'vehicle',kind:'equipamento'})}>Novo equipamento<//>
-  <div class="sm:ml-auto flex gap-2"><${Btn} p=${1} on=${()=>setM({k:'install',plate:v&&v.plate})}>Instalar pneu<//><${Btn} on=${()=>setM({k:'remove'})}>Retirar pneu<//></div></div>
- ${v&&html`<div class="mb-4"><span class="font-head text-3xl font-semibold">${v.plate}</span> <span class="text-mute">${v.model} · ${v.kind==='equipamento'?'Equipamento · horímetro ':''}${mv(s,v.plate,v.km)}</span><div class="mt-1 flex flex-wrap items-center gap-2 text-sm"><span class="text-mute">Empresa responsável:</span><b>${v.empresa||'—'}</b><${Btn} sm=${1} on=${()=>setM({k:'vedit',plate:v.plate})}>Editar cadastro<//></div>
+ const card=x=>{const eq=x.kind==='equipamento',all=posOf(x),fill=all.filter(q=>s.tires.some(t=>t.status==='uso'&&t.plate===x.plate&&t.pos===q.key)).length;
+  return html`<button type="button" key=${x.plate} onClick=${()=>setP(x.plate)} class="rounded-lg border border-line bg-panel p-4 text-left hover:border-brand focus:outline-none focus:ring-2 focus:ring-accent" aria-label=${(eq?'Equipamento ':'Veículo ')+x.plate+', abrir detalhes'}>
+   <div class="flex items-start justify-between gap-2"><div class="font-head text-2xl font-semibold leading-none">${x.plate}</div><span class="rounded-full border border-line px-2 py-0.5 text-xs text-mute">${eq?'Equipamento':'Veículo'}</span></div>
+   <div class="mt-1 text-sm">${x.model}</div>
+   <div class="mt-3 flex items-end justify-between gap-3"><div class="min-w-0 text-xs leading-5 text-mute"><div class="truncate">${eq?'Horímetro':'Km'}: <b class="text-ink">${mv(s,x.plate,x.km)}</b></div><div class="truncate">Empresa: <b class="text-ink">${x.empresa||'—'}</b></div><div class="truncate">Centro de custo: <b class="text-ink">${ccNm(s,ccNow(s,x.plate))}</b></div><div>Pneus instalados: <b class="text-ink">${fill} de ${all.length}</b></div></div>
+    <div class="shrink-0" style=${{width:'72px'}}><${VehMini} s=${s} v=${x}/></div></div></button>`};
+ const vs=s.vehicles.filter(x=>x.kind!=='equipamento'),es=s.vehicles.filter(x=>x.kind==='equipamento');
+ if(!open||!v)return html`<div class="grid gap-5"><div class="flex flex-wrap items-center gap-2"><${Btn} p=${1} on=${()=>setM({k:'vehicle'})}>Novo veículo<//><${Btn} on=${()=>setM({k:'vehicle',kind:'equipamento'})}>Novo equipamento<//><span class="text-sm text-mute sm:ml-auto">Clique em um cadastro para ver os pneus e as informações.</span></div>
+  ${!s.vehicles.length&&html`<${Empty}>Nenhum veículo ou equipamento cadastrado ainda. Use os botões acima para começar.<//>`}
+  ${vs.length>0&&html`<section><h2 class="mb-2 font-head text-xl font-semibold">Veículos <span class="text-base font-normal text-mute">(${vs.length})</span></h2><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${vs.map(card)}</div></section>`}
+  ${es.length>0&&html`<section><h2 class="mb-2 font-head text-xl font-semibold">Equipamentos <span class="text-base font-normal text-mute">(${es.length})</span></h2><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${es.map(card)}</div></section>`}</div>`;
+ return html`<div class="flex flex-wrap items-center gap-2 mb-4"><${Btn} on=${()=>setOpen(false)}>← Todos os cadastros<//>
+  <div class="sm:ml-auto flex gap-2"><${Btn} p=${1} on=${()=>setM({k:'install',plate:v.plate})}>Instalar pneu<//><${Btn} on=${()=>setM({k:'remove'})}>Retirar pneu<//></div></div>
+ <div class="mb-4"><span class="font-head text-3xl font-semibold">${v.plate}</span> <span class="text-mute">${v.model} · ${v.kind==='equipamento'?'Equipamento · horímetro ':''}${mv(s,v.plate,v.km)}</span><div class="mt-1 flex flex-wrap items-center gap-2 text-sm"><span class="text-mute">Empresa responsável:</span><b>${v.empresa||'—'}</b><${Btn} sm=${1} on=${()=>setM({k:'vedit',plate:v.plate})}>Editar cadastro<//></div>
  <div class="mt-1 flex flex-wrap items-center gap-2 text-sm"><span class="text-mute">Centro de custo:</span><b>${ccNm(s,ccNow(s,v.plate))}</b><${Btn} sm=${1} on=${()=>setM({k:'transf',plates:[v.plate]})}>Transferir<//></div></div>
  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${posOf(v).map(({key:p})=>{const t=s.tires.find(x=>x.status==='uso'&&x.plate===v.plate&&x.pos===p);
   return html`<div key=${p} class=${'rounded-lg p-4 bg-panel '+(t?'border border-line':'border border-dashed border-line')}><div class="font-head text-lg font-semibold">${p}</div>
   ${t?html`<div class="mt-1 text-sm">${t.id} · ${t.brand} ${t.model}</div><div class="mt-2"><${Tread} mm=${t.tread}/></div><div class="mt-1 text-xs text-mute">Instalado com ${mv(s,v.plate,t.kmIn)} · rodou ${mv(s,v.plate,Math.max(0,v.km-t.kmIn))}${t.kmVida>0?' · total '+N(kmTire(s,t))+' de '+mv(s,v.plate,t.kmVida):''}</div>
    <div class="mt-3 flex flex-wrap gap-2"><${Btn} sm=${1} on=${()=>setM({k:'swap',tire:t.id})}>Trocar<//><${Btn} sm=${1} on=${()=>setM({k:'rotate',tire:t.id})}>Rodízio<//><${Btn} sm=${1} on=${()=>setM({k:'remove',tire:t.id})}>Retirar<//><${Btn} sm=${1} on=${()=>setM({k:'editinst',tire:t.id})}>Corrigir<//></div>`
-  :html`<div class="mt-2 text-sm text-mute">Posição vazia</div><div class="mt-3"><${Btn} sm=${1} on=${()=>setM({k:'install',plate:v.plate,pos:p})}>Instalar pneu<//></div>`}</div>`})}</div>`}`}
+  :html`<div class="mt-2 text-sm text-mute">Posição vazia</div><div class="mt-3"><${Btn} sm=${1} on=${()=>setM({k:'install',plate:v.plate,pos:p})}>Instalar pneu<//></div>`}</div>`})}</div>`}
 
 function Aplicacao({s,mut,setM,initPlate}){
  const [plate,setP]=useState(initPlate||(s.vehicles[0]?s.vehicles[0].plate:''));
