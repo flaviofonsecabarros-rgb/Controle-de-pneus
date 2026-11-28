@@ -746,7 +746,7 @@ function Tires({s,mut,setM}){
   <div class="w-40"><${Sel} v=${cf} on=${e=>setCf(e.target.value)} opts=${[['','Todos os tipos'],...Object.keys(CONDL).map(k=>[k,CONDL[k]])]}/></div>
   <div class="w-44"><${Sel} v=${mf} on=${e=>setMf(e.target.value)} opts=${[['','Todas as medidas'],...[...new Set(s.tires.map(t=>t.size))].sort().map(z=>[z,z])]}/></div>
   <div class="w-44"><${Sel} v=${sf} on=${e=>setSf(e.target.value)} opts=${[['','Todas as situações'],['ok','Normal / Disponível'],['warn','Atenção'],['bad','Crítico'],['rec','Em recapagem'],['desc','Descartado']]}/></div>
-  <div class="sm:ml-auto flex gap-2">${dl&&html`<${Btn} on=${async()=>{if(busy)return;setBusy(true);setMsg('');try{const f=await exportTiresXlsx(s,rows,sit,km);await dl.save(f);setMsg('Excel salvo.')}catch(e){setMsg(e&&e.code==='declined'?'Download cancelado.':'Não foi possível gerar o Excel agora. Tente de novo.')}setBusy(false)}}>${busy?'Gerando…':'Exportar Excel (.xlsx)'}<//>`}<${Btn} on=${()=>setM({k:'importxml'})}>Importar Excel (.xlsx)<//><${Btn} p=${1} on=${()=>setM({k:'tire'})}>Cadastrar pneu<//></div></div>
+  <div class="sm:ml-auto flex gap-2">${dl&&html`<${Btn} on=${async()=>{if(busy)return;setBusy(true);setMsg('');try{const f=await exportTiresXlsx(s,rows,sit,km);await dl.save(f);setMsg('Excel salvo.')}catch(e){setMsg(e&&e.code==='declined'?'Download cancelado.':'Não foi possível gerar o Excel agora. Tente de novo.')}setBusy(false)}}>${busy?'Gerando…':'Exportar Excel (.xlsx)'}<//>`}<${Btn} on=${()=>setM({k:'pdfinst'})}>Instalar pneus via PDF<//><${Btn} on=${()=>setM({k:'importxml'})}>Importar Excel (.xlsx)<//><${Btn} p=${1} on=${()=>setM({k:'tire'})}>Cadastrar pneu<//></div></div>
  ${msg&&html`<p class="-mt-2 mb-3 text-sm text-mute" role="status">${msg}</p>`}
  <div class="overflow-x-auto rounded-lg border border-line bg-panel"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute">${['Fogo','Marca','Modelo','Medida','Tipo','Recapagens','DOT','Idade','Sulco','Status','Situação','Veículo','Posição','Km na instalação','Km rodado','Vida útil (km)','Km restante','Compra','Custo por km','Serviços','Movimentações','Última movimentação',''].map(h=>html`<th key=${h} class="font-medium px-3 py-2">${h}</th>`)}</tr></thead><tbody>
   ${rows.map(t=>{const S=sit(t);const dy=dotYear(t.dot);const idade=dy?yrNow-dy:null;const u=km(t);const hv=sortH(s.history.filter(x=>x.tireId===t.id||x.tireOut===t.id));const lm=hv[0];const sv=(s.services||[]).filter(x=>x.tireId===t.id);const svT=sv.reduce((a,x)=>a+(x.value||0),0);return html`<tr key=${t.id} class="border-t border-line"><td class="px-3 py-2 font-semibold"><span class="inline-flex items-center gap-2"><span style=${{color:t.status==='sucata'?'var(--bad)':t.tread!=null&&t.tread<=1.6?'var(--bad)':t.tread!=null&&t.tread<=3?'var(--warn)':t.status==='uso'?'var(--ok)':'var(--mute)'}}><${TireIcon} s=${18}/></span>${t.id}</span></td><td class="px-3 py-2">${t.brand}</td><td class="px-3 py-2">${t.model}</td><td class="px-3 py-2">${t.size}</td><td class="px-3 py-2">${CONDL[t.cond]||'—'}</td><td class="px-3 py-2 tabular-nums">${t.recaps||0}</td><td class="px-3 py-2">${t.dot}</td><td class="px-3 py-2 tabular-nums" style=${{color:idade!=null&&idade>=5?'var(--warn)':''}}>${idade==null?'—':idade+(idade===1?' ano':' anos')}</td><td class="px-3 py-2"><${Tread} mm=${t.tread}/></td><td class="px-3 py-2"><${Badge} st=${t.status}/></td><td class="px-3 py-2" title=${S.why}><span class="inline-flex items-center gap-1.5 font-medium"><span aria-hidden="true" style=${{width:'9px',height:'9px',borderRadius:'50%',background:S.c,display:'inline-block'}}></span>${S.l}</span>${S.k!=='ok'&&S.k!=='desc'&&S.why&&html`<div class="max-w-[220px] truncate text-xs text-mute">${S.why}</div>`}</td><td class="px-3 py-2">${t.plate||'—'}</td><td class="px-3 py-2">${t.pos||'—'}</td><td class="px-3 py-2 tabular-nums">${t.status==='uso'&&t.kmIn!=null?N(t.kmIn):'—'}</td><td class="px-3 py-2 tabular-nums">${N(u)}</td><td class="px-3 py-2 tabular-nums">${t.kmVida>0?N(t.kmVida):'—'}${t.kmVida>0&&html`<div class="mt-1 h-1.5 w-16 overflow-hidden rounded-sm bg-line"><div style=${{width:Math.min(100,u/t.kmVida*100)+'%',height:'100%',background:u>=t.kmVida?'var(--bad)':u>=t.kmVida*0.9?'var(--warn)':'var(--ok)'}}></div></div>`}</td><td class="px-3 py-2 tabular-nums" style=${{color:t.kmVida>0&&u>=t.kmVida?'var(--bad)':''}}>${t.kmVida>0?(u>=t.kmVida?'Vencido':N(t.kmVida-u)):'—'}</td><td class="px-3 py-2 tabular-nums">${brl(t.price)}</td><td class="px-3 py-2 tabular-nums">${u>0?'R$ '+(t.price/u).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3}):'—'}</td><td class="px-3 py-2 tabular-nums">${sv.length?sv.length+' · '+brl(svT):'—'}</td><td class="px-3 py-2 tabular-nums">${hv.length}</td><td class="px-3 py-2">${lm?fmtD(lm.date)+' · '+lm.type:'—'}</td>
@@ -766,7 +766,7 @@ function Fleet({s,setM}){
    ${row(eq?'Horímetro':'Km',mv(s,x.plate,x.km),1)}${row('Empresa',x.empresa||'—')}${row('Centro de custo',ccNm(s,ccNow(s,x.plate)))}${row('Pneus instalados',fill+' de '+all.length)}
    <div class="mt-3 w-20 max-w-full self-start"><${VehMini} s=${s} v=${x}/></div></button>`};
  const vs=s.vehicles.filter(x=>x.kind!=='equipamento'),es=s.vehicles.filter(x=>x.kind==='equipamento');
- if(!open||!v)return html`<div class="grid gap-5"><div class="flex flex-wrap items-center gap-2"><${Btn} p=${1} on=${()=>setM({k:'vehicle'})}>Novo veículo<//><${Btn} on=${()=>setM({k:'vehicle',kind:'equipamento'})}>Novo equipamento<//><span class="text-sm text-mute sm:ml-auto">Clique em um cadastro para ver os pneus e as informações.</span></div>
+ if(!open||!v)return html`<div class="grid gap-5"><div class="flex flex-wrap items-center gap-2"><${Btn} p=${1} on=${()=>setM({k:'vehicle'})}>Novo veículo<//><${Btn} on=${()=>setM({k:'vehicle',kind:'equipamento'})}>Novo equipamento<//><${Btn} on=${()=>setM({k:'pdfinst'})}>Instalar pneus via PDF<//><span class="text-sm text-mute sm:ml-auto">Clique em um cadastro para ver os pneus e as informações.</span></div>
   ${!s.vehicles.length&&html`<${Empty}>Nenhum veículo ou equipamento cadastrado ainda. Use os botões acima para começar.<//>`}
   ${vs.length>0&&html`<section><h2 class="mb-2 font-head text-xl font-semibold">Veículos <span class="text-base font-normal text-mute">(${vs.length})</span></h2><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${vs.map(card)}</div></section>`}
   ${es.length>0&&html`<section><h2 class="mb-2 font-head text-xl font-semibold">Equipamentos <span class="text-base font-normal text-mute">(${es.length})</span></h2><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${es.map(card)}</div></section>`}</div>`;
@@ -1288,6 +1288,102 @@ function Obras({s,mut}){
    ${mo.k==='cc'&&html`<${CcForm} s=${s} mut=${mut} close=${()=>setMo(null)} init=${mo.cc} onDone=${i=>setSel(i)}/>`}
    ${mo.k==='transf'&&html`<${TransfForm} s=${s} mut=${mut} close=${()=>setMo(null)} plates=${mo.plates} to=${mo.to} onDone=${i=>setSel(i)}/>`}<//>`}</div>`}
 
+const LIB_PDF='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',LIB_PDFW='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+const groupPdfLines=items=>{const a=items.filter(i=>i.s&&i.s.trim()).sort((p,q)=>q.y-p.y||p.x-q.x);const lines=[];a.forEach(i=>{const l=lines.find(L=>Math.abs(L.y-i.y)<=3);if(l)l.it.push(i);else lines.push({y:i.y,it:[i]})});return lines.sort((p,q)=>q.y-p.y).map(L=>L.it.sort((p,q)=>p.x-q.x).map(i=>i.s.trim()).join('  '))};
+async function pdfLines(buf){
+ await loadLib(LIB_PDF,'pdfjsLib');const P=window.pdfjsLib;if(!P.GlobalWorkerOptions.workerSrc)P.GlobalWorkerOptions.workerSrc=LIB_PDFW;
+ const doc=await P.getDocument({data:new Uint8Array(buf)}).promise;const out=[];
+ for(let i=1;i<=doc.numPages&&i<=60;i++){const pg=await doc.getPage(i),tc=await pg.getTextContent();out.push(...groupPdfLines(tc.items.map(t=>({s:t.str,x:t.transform[4],y:t.transform[5]}))))}
+ return out}
+const pnz=x=>String(x||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9]/g,'');
+const pnum=t=>{const x=String(t).trim();if(!x)return NaN;return +(x.includes(',')?x.replace(/\./g,'').replace(',','.'):/^\d{1,3}(\.\d{3})+$/.test(x)?x.replace(/\./g,''):x)};
+const pdate=t=>{let m=String(t).match(/\b(\d{2})[\/.-](\d{2})[\/.-](\d{4})\b/),y,mo,d;if(m){d=m[1];mo=m[2];y=m[3]}else{m=String(t).match(/\b(\d{4})-(\d{2})-(\d{2})\b/);if(!m)return '';y=m[1];mo=m[2];d=m[3]}const k=y+'-'+mo+'-'+d,dt=new Date(k+'T00:00:00Z');return !isNaN(dt)&&dt.toISOString().slice(0,10)===k?k:''};
+const pkm=t=>{const x=String(t).replace(/\b\d{2}[\/.-]\d{2}[\/.-]\d{4}\b/g,' ').replace(/\b\d{4}-\d{2}-\d{2}\b/g,' ');const m=x.match(/\b(?:KM|HOR[IÍ]METRO|HORAS?|HRS?)\s*[:=]?\s*(\d[\d.]*(?:,\d+)?)/i)||x.match(/(\d[\d.]*(?:,\d+)?)\s*(?:KM|HORAS?|HRS?)\b/i)||x.match(/\b(\d{1,3}(?:\.\d{3})+(?:,\d+)?)\b/);return m?pnum(m[1]):NaN};
+function guessPos(v,line){
+ if(!v)return '';const ps=posOf(v),L=pnz(line);let best='',bl=0;
+ ps.forEach(p=>{const k=pnz(p.key);if(k.length>bl&&L.includes(k)){best=p.key;bl=k.length}});if(best)return best;
+ const U=String(line).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+ const body=(v.axles||[]).filter(a=>a.type!=='est'),spare=(v.axles||[]).filter(a=>a.type==='est');
+ if(/\b(ESTEPE|RESERVA|SOCORRO)\b/.test(U)&&spare[0])return posOf({axles:[spare[0]]})[0].key;
+ let n=0,m=U.match(/\bEIXO\s*(\d+)\b/)||U.match(/\b(\d+)\s*[º°O]?\s*EIXO\b/);if(m)n=+m[1];
+ let code='';if(!n){m=U.match(/\b(\d)\s*([ED])([IE])?\b/);if(m){n=+m[1];code=(m[2]||'')+(m[3]||'')}}
+ if(!n){m=U.match(/\b(\d)\b(?=\s*[º°]?\s*(?:ESQ|DIR|EXT|INT))/);if(m)n=+m[1]}
+ if(!n&&/\bDIANT/.test(U))n=1;
+ const a=body[n-1];if(!a)return '';
+ const esq=/\b(ESQ|ESQUERDO|ESQUERDA)\b/.test(U)||code[0]==='E',dir=/\b(DIR|DIREITO|DIREITA)\b/.test(U)||code[0]==='D';
+ const ext=/\bEXT(ERNO)?\b/.test(U)||code[1]==='E',int=/\bINT(ERNO)?\b/.test(U)||code[1]==='I';
+ if(esq===dir)return '';
+ const sd=(esq?'Esquerdo':'Direito')+(a.dual?(ext===int?'':(ext?' Externo':' Interno')):'');
+ if(a.dual&&ext===int)return '';
+ const key=a.name+' · '+sd;return ps.some(p=>p.key===key)?key:'';
+}
+function parsePdfInstalls(lines,s,defDate){
+ const rows=[];let ctx='',id=1;
+ const tk=l=>String(l).split(/[\s|;,]+/).map(pnz).filter(Boolean);
+ lines.forEach(line=>{
+  const T=tk(line),Ln=pnz(line);let pl='';
+  s.vehicles.forEach(v=>{const k=pnz(v.plate);if(k.length>=3&&(T.includes(k)||(k.length>=6&&Ln.includes(k)))&&(!pl||k.length>pnz(pl).length))pl=v.plate});
+  if(pl)ctx=pl;
+  let tire=null;s.tires.forEach(t=>{const k=pnz(t.id);if(k&&T.includes(k)&&(!tire||k.length>pnz(tire.id).length))tire=t});
+  const vh=s.vehicles.find(v=>v.plate===(pl||ctx)),pos=guessPos(vh,line);
+  if(!tire&&!(pos&&vh))return;
+  const km=pkm(line);
+  rows.push({id:id++,on:true,plate:vh?vh.plate:'',tire:tire?tire.id:'',pos,km:isNaN(km)?(vh?String(vh.km):''):String(km),date:pdate(line)||defDate,src:line});
+ });
+ return rows}
+function checkPdfRow(s,rows,r){
+ const m=[];const v=s.vehicles.find(x=>x.plate===r.plate),t=s.tires.find(x=>x.id===r.tire);
+ if(!v)m.push('escolha o veículo ou equipamento');
+ if(!r.tire)m.push('escolha o pneu');else if(!t)m.push('pneu não cadastrado');else if(t.status!=='estoque')m.push(t.status==='uso'?'pneu já está em uso em '+t.plate:'pneu não está em estoque ('+(ST[t.status]||t.status)+')');
+ if(v){if(!r.pos)m.push('escolha a posição');else if(!posOf(v).some(p=>p.key===r.pos))m.push('posição não existe neste cadastro');else if(s.tires.some(x=>x.status==='uso'&&x.plate===r.plate&&x.pos===r.pos))m.push('posição já tem um pneu instalado')}
+ if(r.km===''||!(+r.km>=0))m.push('km ou horímetro inválido');
+ if(!r.date)m.push('data inválida');
+ const o=rows.filter(x=>x.on&&x.id!==r.id);
+ if(r.tire&&o.some(x=>x.tire===r.tire))m.push('o mesmo pneu aparece em outra linha');
+ if(r.plate&&r.pos&&o.some(x=>x.plate===r.plate&&x.pos===r.pos))m.push('outra linha usa a mesma posição');
+ return m}
+
+function PdfInstall({s,mut,close}){
+ const [rows,setRows]=useState(null);const [lines,setLines]=useState([]);const [name,setName]=useState('');const [busy,setBusy]=useState(false);const [err,setE]=useState('');const [raw,setRaw]=useState(false);const [done,setDone]=useState(0);
+ const [dd,setDd]=useState(today());
+ const stock=s.tires.filter(t=>t.status==='estoque');
+ const pick=e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;setE('');setBusy(true);
+  const r=new FileReader();r.onerror=()=>{setBusy(false);setE('Não foi possível ler o arquivo.')};
+  r.onload=async()=>{try{const L=await pdfLines(r.result);setName(f.name);setLines(L);if(!L.length){setRows(null);setE('Não encontrei texto neste PDF. Se ele for uma foto ou um documento escaneado, não consigo ler. Use um PDF gerado por computador.')}else setRows(parsePdfInstalls(L,s,dd))}catch(x){setE('Não foi possível ler este PDF agora. Confira se o arquivo não está protegido por senha e se há internet.')}setBusy(false)};
+  r.readAsArrayBuffer(f)};
+ const up=(id,k,v)=>setRows(rs=>rs.map(r=>r.id===id?{...r,[k]:v}:r));
+ const chk=rows?rows.map(r=>({r,m:r.on?checkPdfRow(s,rows,r):[]})):[];
+ const sel=chk.filter(x=>x.r.on),bad=sel.filter(x=>x.m.length).length;
+ const add=()=>setRows(rs=>[...rs,{id:Math.max(0,...rs.map(r=>r.id))+1,on:true,plate:s.vehicles[0]?s.vehicles[0].plate:'',tire:'',pos:'',km:s.vehicles[0]?String(s.vehicles[0].km):'',date:dd,src:'(linha adicionada por você)'}]);
+ const apply=()=>{if(!sel.length||bad)return;const L=sel.map(x=>x.r);
+  mut(n=>{L.forEach(r=>{const t=tireOf(n,r.tire);if(!t)return;doInstall(n,t,r.plate,r.pos,+r.km);log(n,{date:r.date,type:'Instalação',reason:'—',tireId:t.id,plate:r.plate,pos:r.pos,km:+r.km,cost:0,note:'Importado de PDF'+(name?' ('+name+')':'')})})});
+  setDone(L.length);setRows(null)};
+ if(done)return html`<p class="text-sm">${done} ${done===1?'instalação aplicada':'instalações aplicadas'}. Os pneus já aparecem em uso nos veículos e no Histórico.</p><div class="mt-5 flex justify-end"><${Btn} p=${1} on=${close}>Fechar<//></div>`;
+ if(!rows)return html`<div class="grid gap-3"><p class="text-sm">Envie um PDF com as instalações de pneus (veículo ou equipamento, número de fogo do pneu, posição, km ou horímetro e data). O sistema lê o texto e <b>mostra tudo para você conferir e corrigir antes de gravar</b>. Nada é aplicado sem a sua aprovação.</p>
+  <label class="block text-sm"><span class="text-mute">Data a usar quando o PDF não trouxer</span><${Inp} type="date" v=${dd} on=${e=>setDd(e.target.value)}/></label>
+  <label class=${'inline-flex w-fit cursor-pointer items-center rounded-md bg-accent px-4 py-2 font-medium text-onaccent '+(busy?'opacity-60':'')}>${busy?'Lendo o PDF…':'Escolher arquivo PDF'}<input type="file" accept=".pdf,application/pdf" class="sr-only" disabled=${busy} onChange=${pick}/></label>
+  ${err&&html`<p class="text-sm text-bad" role="alert">${err}</p>`}
+  <p class="text-xs text-mute">O pneu precisa estar cadastrado e em estoque, e o veículo ou equipamento precisa existir na Frota. Para o sistema reconhecer, o PDF deve trazer a placa ou identificação e o número de fogo exatamente como estão cadastrados.</p></div>
+  <div class="mt-5 flex justify-end"><${Btn} on=${close}>Cancelar<//></div>`;
+ return html`<div class="grid gap-3">
+  <p class="text-sm"><b>${name}</b>: encontrei ${rows.length} ${rows.length===1?'linha':'linhas'} possível${rows.length===1?'':'is'} de instalação. Confira cada uma, corrija o que precisar e só então aplique. Desmarque as que não devem entrar.</p>
+  ${rows.length===0&&html`<p class="rounded-md border border-warn p-3 text-sm">Não reconheci nenhuma instalação. Use "Adicionar linha" para lançar manualmente ou abra "Texto lido do PDF" para ver o que o sistema enxergou.</p>`}
+  <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-mute">${['','Veículo / equipamento','Pneu','Posição','Km / horas','Data','Situação',''].map((c,i)=>html`<th key=${i} class="px-2 py-1 font-medium whitespace-nowrap">${c}</th>`)}</tr></thead><tbody>
+  ${chk.map(({r,m})=>{const v=s.vehicles.find(x=>x.plate===r.plate),eq=v&&v.kind==='equipamento';return html`<${Fragment} key=${r.id}><tr class=${'border-t border-line align-top '+(r.on?'':'opacity-50')}>
+   <td class="px-2 py-2"><input type="checkbox" checked=${r.on} onChange=${e=>up(r.id,'on',e.target.checked)} aria-label="Incluir esta linha"/></td>
+   <td class="px-2 py-1 min-w-[10rem]"><${Sel} v=${r.plate} on=${e=>{const nv=s.vehicles.find(x=>x.plate===e.target.value);setRows(rs=>rs.map(x=>x.id===r.id?{...x,plate:e.target.value,pos:nv&&posOf(nv).some(p=>p.key===x.pos)?x.pos:'',km:nv?String(nv.km):x.km}:x))}} opts=${[['','— escolher —'],...s.vehicles.map(x=>[x.plate,x.plate+' · '+x.model])]}/></td>
+   <td class="px-2 py-1 min-w-[12rem]"><${Sel} v=${r.tire} on=${e=>up(r.id,'tire',e.target.value)} opts=${[['','— escolher —'],...stock.map(t=>[t.id,t.id+' · '+t.brand+' '+t.model+' '+t.size]),...(r.tire&&!stock.some(t=>t.id===r.tire)?[[r.tire,r.tire+' (indisponível)']]:[])]}/></td>
+   <td class="px-2 py-1 min-w-[11rem]"><${Sel} v=${r.pos} on=${e=>up(r.id,'pos',e.target.value)} opts=${[['','— escolher —'],...(v?posOf(v).map(p=>[p.key,p.key]):[])]}/></td>
+   <td class="px-2 py-1 w-28"><${Inp} type="number" step=${eq?'0.1':'1'} v=${r.km} on=${e=>up(r.id,'km',e.target.value)}/></td>
+   <td class="px-2 py-1 w-40"><${Inp} type="date" v=${r.date} on=${e=>up(r.id,'date',e.target.value)}/></td>
+   <td class="px-2 py-2 text-xs min-w-[9rem]">${!r.on?html`<span class="text-mute">Fora</span>`:m.length?html`<span class="text-bad">${m.join('; ')}</span>`:html`<span class="text-ok font-medium">Pronto</span>`}</td>
+   <td class="px-2 py-2"><button type="button" class="text-mute underline" onClick=${()=>setRows(rs=>rs.filter(x=>x.id!==r.id))}>Remover</button></td></tr>
+   <tr><td></td><td colSpan="7" class="px-2 pb-2 text-xs text-mute">No PDF: ${r.src}</td></tr><//>`})}</tbody></table></div>
+  <div class="flex flex-wrap items-center gap-2"><${Btn} sm=${1} on=${add}>Adicionar linha<//><button type="button" class="text-sm underline" onClick=${()=>setRaw(x=>!x)}>${raw?'Ocultar':'Ver'} texto lido do PDF</button><button type="button" class="ml-auto text-sm underline" onClick=${()=>{setRows(null);setE('')}}>Escolher outro PDF</button></div>
+  ${raw&&html`<pre class="max-h-48 overflow-auto rounded-md border border-line bg-bg p-2 text-xs whitespace-pre-wrap">${lines.join('\n')}</pre>`}</div>
+  ${sel.length>0&&bad>0&&html`<p class="mt-3 text-sm text-bad" role="alert">${bad} ${bad===1?'linha precisa':'linhas precisam'} de correção antes de aplicar.</p>`}
+  <div class="mt-5 flex justify-end gap-2"><${Btn} on=${close}>Cancelar<//><button type="button" onClick=${apply} disabled=${!sel.length||bad>0} class=${'rounded-md bg-accent px-4 py-2 font-medium text-onaccent '+(!sel.length||bad>0?'opacity-50':'')}>Aplicar ${sel.length} ${sel.length===1?'instalação':'instalações'}</button></div>`}
+
 function Relatorios({s}){
  const [per,setPer]=useState('365');const [from,setFrom]=useState('');const [to,setTo]=useState('');const [pl,setPl]=useState('');const [msg,setMsg]=useState('');const [box,setBox]=useState('');const [dl,setDl]=useState(null);const [busy,setBusy]=useState('');
  useEffect(()=>{let ok=true;try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{if(ok)setDl(d||false)},()=>{if(ok)setDl(false)});else setDl(false)}catch(e){setDl(false)}return()=>{ok=false}},[]);
@@ -1422,7 +1518,7 @@ function App({init,sync,remote}={}){
  const goVeh=pl=>{setSel(pl);setTab('aplic')};
  const role=sync?sync.role:'administrador',ro=role==='consulta',adm=role==='administrador';const [note,setNote]=useState('');
  const warn=t=>{setNote(t);clearTimeout(window.__nt);window.__nt=setTimeout(()=>setNote(''),4000)};
- const WR=['tire','importxml','fuel','svc','vehicle','install','remove','swap','rotate','editinst','past','transf','vedit'];
+ const WR=['tire','importxml','fuel','svc','vehicle','install','remove','swap','rotate','editinst','past','transf','vedit','pdfinst'];
  const setMg=v=>{if(ro&&v&&WR.includes(v.k)){warn('Seu perfil é somente consulta: não é possível lançar ou alterar dados.');return}setM(v)};
  const skip=React.useRef(true);
  useEffect(()=>{if(skip.current){skip.current=false;return}if(sync){sync.save(s)}else{try{localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}}},[s]);
@@ -1438,7 +1534,7 @@ function App({init,sync,remote}={}){
  const al=alertsOf(s).length;
  useEffect(()=>{try{if(desk&&desk.app&&desk.app.dock)desk.app.dock.setBadge(al?String(al):'').catch(()=>{})}catch(e){}},[desk,al]);
  const instalar=()=>{try{desk.install.request().then(r=>{if(r==='installed')setInst('installed')},()=>{})}catch(e){}};
- const titles={fuel:m&&m.fuel?'Editar abastecimento':'Registrar abastecimento',svc:m&&m.svc?'Editar serviço':'Registrar serviço',importxml:'Importar pneus do Excel',tire:m&&m.t?'Editar pneu '+m.t.id:'Cadastrar pneu',vehicle:m&&m.kind==='equipamento'?'Novo equipamento':'Novo veículo',vedit:'Editar cadastro',transf:'Transferir para centro de custo',install:'Instalar pneu',remove:'Retirar pneu',swap:'Registrar troca',rotate:'Registrar rodízio',past:'Registrar evento anterior',vinfo:'Veículo '+(m&&m.plate||''),editinst:'Corrigir instalação',thist:m&&m.t?'Histórico do pneu '+m.t.id:''};
+ const titles={fuel:m&&m.fuel?'Editar abastecimento':'Registrar abastecimento',svc:m&&m.svc?'Editar serviço':'Registrar serviço',importxml:'Importar pneus do Excel',pdfinst:'Instalar pneus a partir de PDF',tire:m&&m.t?'Editar pneu '+m.t.id:'Cadastrar pneu',vehicle:m&&m.kind==='equipamento'?'Novo equipamento':'Novo veículo',vedit:'Editar cadastro',transf:'Transferir para centro de custo',install:'Instalar pneu',remove:'Retirar pneu',swap:'Registrar troca',rotate:'Registrar rodízio',past:'Registrar evento anterior',vinfo:'Veículo '+(m&&m.plate||''),editinst:'Corrigir instalação',thist:m&&m.t?'Histórico do pneu '+m.t.id:''};
  const hoje=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'});
  return html`<div class="min-h-screen lg:flex font-body">${note&&html`<div class="fixed left-1/2 top-3 z-50 -translate-x-1/2 rounded-md border border-warn bg-panel px-4 py-2 text-sm shadow" role="alert">${note}</div>`}
   <aside class="shrink-0 flex flex-col bg-[#131416] text-[#E6E8EB] lg:w-60 lg:h-screen lg:sticky lg:top-0">
@@ -1467,9 +1563,10 @@ function App({init,sync,remote}={}){
     ${tab==='usr'&&adm&&sync&&html`<${Usuarios} sb=${sync.sb} me=${sync.email}/>`}
     <footer class="mt-10 text-xs text-mute">${sync?'Dados salvos no Supabase e compartilhados com os usuários autorizados.':'Dados salvos neste navegador.'} ${dl&&html`<button class="underline mr-3" onClick=${exportBk}>Exportar backup</button>`}${adm&&html`<label class="underline cursor-pointer mr-3">Importar backup<input type="file" accept=".json,application/json" class="sr-only" onChange=${pickBk}/></label>`}${bmsg&&html`<span class="mr-3" role="status">${bmsg}</span>`}${bk&&html`<span class="mr-3">Substituir todos os dados atuais por ${bk.name} (${bk.v} veículos, ${bk.t} pneus)? <button class="underline text-bad" onClick=${()=>{setS(migrate(JSON.parse(JSON.stringify(bk.d))));setBk(null);setBmsg('Backup importado.')}}>Sim, substituir</button> <button class="underline" onClick=${()=>setBk(null)}>Cancelar</button></span>`}${!adm?'':conf?html`${sync?'Apagar os dados de TODOS os usuários?':'Apagar todos os pneus, veículos e histórico?'} <button class="underline text-bad" onClick=${()=>{setS(fresh());setConf(false)}}>Sim, apagar tudo</button> <button class="underline" onClick=${()=>setConf(false)}>Cancelar</button>`:html`<button class="underline" onClick=${()=>setConf(true)}>Apagar todos os dados</button>`}</footer>
    </main></div>
-  ${m&&html`<${Modal} title=${titles[m.k]} close=${close} wide=${m.k==='vinfo'||m.k==='tire'||m.k==='importxml'}>
+  ${m&&html`<${Modal} title=${titles[m.k]} close=${close} wide=${m.k==='vinfo'||m.k==='tire'||m.k==='importxml'||m.k==='pdfinst'}>
    ${m.k==='tire'&&html`<${TireForm} init=${m.t} s=${s} mut=${mut} close=${close}/>`}
    ${m.k==='importxml'&&html`<${ImportXml} s=${s} mut=${mut} close=${close}/>`}
+   ${m.k==='pdfinst'&&html`<${PdfInstall} s=${s} mut=${mut} close=${close}/>`}
    ${m.k==='fuel'&&html`<${AbastForm} s=${s} mut=${mut} close=${close} init=${m.fuel} plate=${m.plate}/>`}
    ${m.k==='svc'&&html`<${ServicoForm} s=${s} mut=${mut} close=${close} init=${m.svc} plate=${m.plate}/>`}
    ${m.k==='vehicle'&&html`<${VehicleForm} s=${s} mut=${mut} close=${close} kind=${m.kind}/>`}
