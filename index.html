@@ -346,19 +346,22 @@ function Abastecimentos({s,mut,setM}){
    <td class="px-3 py-2 text-right"><span class="inline-flex gap-2"><${Btn} sm=${1} on=${()=>setM({k:'fuel',fuel:x})}>Editar<//>${del===x.id?html`<${Btn} sm=${1} on=${()=>{mut(n=>{n.fuel=n.fuel.filter(y=>y.id!==x.id)});setDel('')}}>Confirmar exclusão<//>`:html`<${Btn} sm=${1} on=${()=>setDel(x.id)}>Excluir<//>`}</span></td></tr>`)}
   </tbody></table>${!rows.length&&html`<p class="p-4 text-sm text-mute">${all.length?'Nenhum abastecimento para este veículo.':'Nenhum abastecimento registrado ainda. Clique em Registrar abastecimento: o km (veículo) ou horímetro (equipamento) é atualizado e a média é calculada.'}</p>`}</div>${im&&html`<${Modal} title="Importar abastecimentos do Excel" close=${()=>setIm(false)} wide><${ImportFuel} s=${s} mut=${mut} close=${()=>setIm(false)}/><//>`}`}
 
-function VehicleForm({s,mut,close,kind}){
- const [f,u]=useF({kind:kind==='equipamento'?'equipamento':'veiculo',plate:'',model:'',km:'',cc:''});const [err,setE]=useState('');
+const empAll=s=>[...new Set((s.vehicles||[]).map(v=>v.empresa).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+function VehicleForm({s,mut,close,kind,init}){
+ const [f,u]=useF(init?{kind:init.kind||'veiculo',plate:init.plate,model:init.model,km:String(init.km),cc:'',empresa:init.empresa||''}:{kind:kind==='equipamento'?'equipamento':'veiculo',plate:'',model:'',km:'',cc:'',empresa:''});const [err,setE]=useState('');
  const eq=f.kind==='equipamento';
- const sub=()=>{const p=f.plate.trim().toUpperCase();
+ const save=()=>{if(!f.model.trim())return setE('Informe o modelo.');mut(n=>{const v=n.vehicles.find(x=>x.plate===init.plate);if(v){v.model=f.model.trim();v.empresa=f.empresa.trim().toUpperCase()}});close()};
+ const sub=()=>{if(init)return save();const p=f.plate.trim().toUpperCase();
   if(!p||!f.model.trim())return setE(eq?'Informe a identificação e o modelo.':'Informe placa e modelo.');
   if(s.vehicles.some(v=>v.plate===p))return setE(eq?'Essa identificação já está cadastrada.':'Essa placa já está cadastrada.');
   if(f.km===''||+f.km<0)return setE(eq?'Informe o horímetro atual.':'Informe a quilometragem atual.');
-  mut(n=>{n.vehicles.push({plate:p,model:f.model.trim(),km:+f.km,kind:f.kind,axles:defAxles()});n.vehicles.sort(byPlate);if(f.cc){n.alloc=n.alloc||[];n.alloc.push({id:Math.max(0,...n.alloc.map(a=>a.id))+1,plate:p,cc:f.cc,date:'',note:'Cadastro inicial'})}});close()};
- return html`<div class="grid gap-3"><${Fld} l="Tipo de cadastro"><${Sel} v=${f.kind} on=${u('kind')} opts=${[['veiculo','Veículo (conta quilometragem, km)'],['equipamento','Equipamento (conta horímetro, horas)']]}/><//>
-  <${Fld} l=${eq?'Identificação / patrimônio':'Placa'}><${Inp} v=${f.plate} on=${u('plate')} ph=${eq?'EQ-001':'ABC-1D23'}/><//><${Fld} l="Modelo"><${Inp} v=${f.model} on=${u('model')}/><//>
-  <${Fld} l=${eq?'Horímetro atual (h)':'Km atual'}><${Inp} type="number" step=${eq?'0.1':'1'} v=${f.km} on=${u('km')}/><//>${ccAll(s).length>0&&html`<${Fld} l="Centro de custo (opcional)"><${Sel} v=${f.cc} on=${u('cc')} opts=${[['','Sem centro de custo'],...ccAll(s).map(c=>[c.id,c.name])]}/><//>`}</div>
+  mut(n=>{n.vehicles.push({plate:p,model:f.model.trim(),km:+f.km,kind:f.kind,empresa:f.empresa.trim().toUpperCase(),axles:defAxles()});n.vehicles.sort(byPlate);if(f.cc){n.alloc=n.alloc||[];n.alloc.push({id:Math.max(0,...n.alloc.map(a=>a.id))+1,plate:p,cc:f.cc,date:'',note:'Cadastro inicial'})}});close()};
+ return html`<div class="grid gap-3"><${Fld} l="Tipo de cadastro"><${Sel} v=${f.kind} on=${u('kind')} dis=${!!init} opts=${[['veiculo','Veículo (conta quilometragem, km)'],['equipamento','Equipamento (conta horímetro, horas)']]}/><//>
+  ${init?html`<div class="text-sm"><span class="text-mute">${eq?'Identificação / patrimônio':'Placa'}</span><div class="mt-1 font-semibold">${f.plate}</div></div>`:html`<${Fld} l=${eq?'Identificação / patrimônio':'Placa'}><${Inp} v=${f.plate} on=${u('plate')} ph=${eq?'EQ-001':'ABC-1D23'}/><//>`}<${Fld} l="Modelo"><${Inp} v=${f.model} on=${u('model')}/><//>
+  <${Fld} l="Empresa responsável (opcional)"><input class=${IN+' uppercase'} list="dl-emp" value=${f.empresa} onChange=${e=>{UP(e);u('empresa')(e)}} placeholder="Nome da empresa" autoComplete="off"/><datalist id="dl-emp">${empAll(s).map(b=>html`<option key=${b} value=${b}/>`)}</datalist><//>
+  ${!init&&html`<${Fld} l=${eq?'Horímetro atual (h)':'Km atual'}><${Inp} type="number" step=${eq?'0.1':'1'} v=${f.km} on=${u('km')}/><//>`}${!init&&ccAll(s).length>0&&html`<${Fld} l="Centro de custo (opcional)"><${Sel} v=${f.cc} on=${u('cc')} opts=${[['','Sem centro de custo'],...ccAll(s).map(c=>[c.id,c.name])]}/><//>`}</div>
   <p class="mt-2 text-xs text-mute">${eq?'Equipamentos usam horímetro (horas de trabalho) no lugar da quilometragem em instalações, trocas, serviços e abastecimentos.':'Veículos usam quilometragem (km).'}</p>
-  <${Foot} err=${err} close=${close} ok=${sub} label=${eq?'Cadastrar equipamento':'Cadastrar veículo'}/>`}
+  <${Foot} err=${err} close=${close} ok=${sub} label=${init?'Salvar':eq?'Cadastrar equipamento':'Cadastrar veículo'}/>`}
 
 function InstallForm({s,mut,close,plate,pos}){
  const stock=s.tires.filter(t=>t.status==='estoque');
@@ -744,7 +747,8 @@ function Fleet({s,setM}){
  const v=s.vehicles.find(x=>x.plate===plate)||s.vehicles[0];
  return html`<div class="flex flex-wrap gap-2 mb-4">${s.vehicles.map(x=>html`<button key=${x.plate} onClick=${()=>setP(x.plate)} class=${'rounded-md px-4 py-2 font-medium '+(v&&v.plate===x.plate?'bg-brand text-onbrand':'border border-line')} title=${x.kind==='equipamento'?'Equipamento (horímetro)':'Veículo (km)'}>${x.plate}${x.kind==='equipamento'&&html` <span class="text-xs font-normal opacity-70">EQ</span>`}</button>`)}<${Btn} on=${()=>setM({k:'vehicle'})}>Novo veículo<//><${Btn} on=${()=>setM({k:'vehicle',kind:'equipamento'})}>Novo equipamento<//>
   <div class="sm:ml-auto flex gap-2"><${Btn} p=${1} on=${()=>setM({k:'install',plate:v&&v.plate})}>Instalar pneu<//><${Btn} on=${()=>setM({k:'remove'})}>Retirar pneu<//></div></div>
- ${v&&html`<div class="mb-4"><span class="font-head text-3xl font-semibold">${v.plate}</span> <span class="text-mute">${v.model} · ${v.kind==='equipamento'?'Equipamento · horímetro ':''}${mv(s,v.plate,v.km)}</span><div class="mt-1 flex flex-wrap items-center gap-2 text-sm"><span class="text-mute">Centro de custo:</span><b>${ccNm(s,ccNow(s,v.plate))}</b><${Btn} sm=${1} on=${()=>setM({k:'transf',plates:[v.plate]})}>Transferir<//></div></div>
+ ${v&&html`<div class="mb-4"><span class="font-head text-3xl font-semibold">${v.plate}</span> <span class="text-mute">${v.model} · ${v.kind==='equipamento'?'Equipamento · horímetro ':''}${mv(s,v.plate,v.km)}</span><div class="mt-1 flex flex-wrap items-center gap-2 text-sm"><span class="text-mute">Empresa responsável:</span><b>${v.empresa||'—'}</b><${Btn} sm=${1} on=${()=>setM({k:'vedit',plate:v.plate})}>Editar cadastro<//></div>
+ <div class="mt-1 flex flex-wrap items-center gap-2 text-sm"><span class="text-mute">Centro de custo:</span><b>${ccNm(s,ccNow(s,v.plate))}</b><${Btn} sm=${1} on=${()=>setM({k:'transf',plates:[v.plate]})}>Transferir<//></div></div>
  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${posOf(v).map(({key:p})=>{const t=s.tires.find(x=>x.status==='uso'&&x.plate===v.plate&&x.pos===p);
   return html`<div key=${p} class=${'rounded-lg p-4 bg-panel '+(t?'border border-line':'border border-dashed border-line')}><div class="font-head text-lg font-semibold">${p}</div>
   ${t?html`<div class="mt-1 text-sm">${t.id} · ${t.brand} ${t.model}</div><div class="mt-2"><${Tread} mm=${t.tread}/></div><div class="mt-1 text-xs text-mute">Instalado com ${mv(s,v.plate,t.kmIn)} · rodou ${mv(s,v.plate,Math.max(0,v.km-t.kmIn))}${t.kmVida>0?' · total '+N(kmTire(s,t))+' de '+mv(s,v.plate,t.kmVida):''}</div>
@@ -1171,7 +1175,7 @@ async function exportObraXlsx(s,id,perTxt,D,rows,log){
  const f=ccSum(D.fuel,x=>x.value),v=ccSum(D.svc,x=>x.value),e=ccSum(D.ev,x=>x.cost);
  sheet('Resumo',[['Item',30],['Valor',34]],[['Centro de custo',nm],['Código',cc.code||''],['Período',perTxt],['Unidades com lançamentos',rows.length],['Combustível (R$)',f],['Serviços (R$)',v],['Custos de pneus (R$)',e],['Total (R$)',f+v+e],['Litros abastecidos',ccSum(D.fuel,x=>x.liters)]]).eachRow((r,i)=>{if(i>1&&typeof r.getCell(2).value==='number')r.getCell(2).numFmt=i===5?'0':i>=6&&i<=9?MON:'#,##0.0'});
  const vm=p=>(s.vehicles.find(x=>x.plate===p)||{}).model||'';
- sheet('Por unidade',[['Unidade',14],['Modelo',22],['Tipo',14],['Combustível (R$)',17,MON],['Serviços (R$)',15,MON],['Custos de pneus (R$)',20,MON],['Total (R$)',15,MON],['Litros',11,'#,##0.0'],['Percorrido',13,'#,##0.0'],['Medida',9]],rows.map(r=>[r.v.plate,r.v.model||vm(r.v.plate),r.eq?'Equipamento':'Veículo',r.fuel,r.svc,r.ev,r.total,r.liters,r.dist,r.u]));
+ sheet('Por unidade',[['Unidade',14],['Modelo',22],['Tipo',14],['Empresa responsável',24],['Combustível (R$)',17,MON],['Serviços (R$)',15,MON],['Custos de pneus (R$)',20,MON],['Total (R$)',15,MON],['Litros',11,'#,##0.0'],['Percorrido',13,'#,##0.0'],['Medida',9]],rows.map(r=>[r.v.plate,r.v.model||vm(r.v.plate),r.eq?'Equipamento':'Veículo',r.v.empresa||'',r.fuel,r.svc,r.ev,r.total,r.liters,r.dist,r.u]));
  sheet('Abastecimentos',[['Data',12,'dd/mm/yyyy'],['Unidade',14],['Modelo',22],['Km / horímetro',14,'#,##0.0'],['Litros',11,'#,##0.00'],['Valor (R$)',14,MON],['Observação',30]],[...D.fuel].sort((a,b)=>a.date.localeCompare(b.date)).map(x=>[Dt(x.date),x.plate,vm(x.plate),x.km,x.liters,x.value||0,x.note||'']));
  sheet('Serviços',[['Data',12,'dd/mm/yyyy'],['Unidade',14],['Serviço',24],['Pneu',12],['Valor (R$)',14,MON],['Observação',30]],[...D.svc].sort((a,b)=>a.date.localeCompare(b.date)).map(x=>[Dt(x.date),x.plate,SVC[x.type]||x.type,x.tireId||'',x.value||0,x.note||'']));
  sheet('Eventos de pneus',[['Data',12,'dd/mm/yyyy'],['Unidade',14],['Evento',14],['Pneu',12],['Posição',24],['Motivo',18],['Custo (R$)',14,MON]],[...D.ev].sort((a,b)=>a.date.localeCompare(b.date)).map(x=>[Dt(x.date),x.plate,x.type,x.tireId||'',x.pos||'',x.reason||'',x.cost||0]));
@@ -1223,8 +1227,8 @@ function Obras({s,mut}){
    <p class="mt-2 text-xs text-mute">Cada custo conta na obra em que a unidade estava na data do lançamento. Não entra o valor de compra dos pneus, que não tem data.</p></section>
   <div class="grid grid-cols-2 gap-3 lg:grid-cols-4"><${Tile} sm=${1} l="Custo total" v=${brl(total)} sub=${perTxt}/><${Tile} sm=${1} l="Combustível" v=${brl(fv)} sub=${f1(lit)+' L abastecidos'}/><${Tile} sm=${1} l="Serviços" v=${brl(sv)} sub=${D.svc.length+(D.svc.length===1?' serviço':' serviços')}/><${Tile} sm=${1} l="Custos de pneus" v=${brl(evv)} sub=${D.ev.length+(D.ev.length===1?' evento com custo':' eventos com custo')}/></div>
   <section class="rounded-lg border border-line bg-panel p-4"><h3 class="font-head text-xl font-semibold">Alocados hoje neste centro de custo</h3>
-   ${hereNow.length?html`<div class="mt-3 overflow-x-auto"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute"><th class="px-3 py-2 font-medium">Unidade</th><th class="px-3 py-2 font-medium">Modelo</th><th class="px-3 py-2 font-medium">Tipo</th><th class="px-3 py-2 font-medium">Desde</th><th class="px-3 py-2"></th></tr></thead><tbody>
-    ${hereNow.map(v=>html`<tr key=${v.plate} class="border-t border-line"><td class="px-3 py-2 font-semibold">${v.plate}</td><td class="px-3 py-2">${v.model}</td><td class="px-3 py-2">${v.kind==='equipamento'?'Equipamento':'Veículo'}</td><td class="px-3 py-2">${lastDate(v.plate)}</td><td class="px-3 py-2 text-right"><${Btn} sm=${1} on=${()=>setMo({k:'transf',plates:[v.plate],to:null})}>Transferir<//></td></tr>`)}</tbody></table></div>`:html`<p class="mt-2 text-sm text-mute">Nenhum veículo ou equipamento alocado aqui no momento.</p>`}</section>
+   ${hereNow.length?html`<div class="mt-3 overflow-x-auto"><table class="tbl w-full text-sm whitespace-nowrap"><thead><tr class="text-left text-mute"><th class="px-3 py-2 font-medium">Unidade</th><th class="px-3 py-2 font-medium">Modelo</th><th class="px-3 py-2 font-medium">Tipo</th><th class="px-3 py-2 font-medium">Empresa</th><th class="px-3 py-2 font-medium">Desde</th><th class="px-3 py-2"></th></tr></thead><tbody>
+    ${hereNow.map(v=>html`<tr key=${v.plate} class="border-t border-line"><td class="px-3 py-2 font-semibold">${v.plate}</td><td class="px-3 py-2">${v.model}</td><td class="px-3 py-2">${v.kind==='equipamento'?'Equipamento':'Veículo'}</td><td class="px-3 py-2">${v.empresa||'—'}</td><td class="px-3 py-2">${lastDate(v.plate)}</td><td class="px-3 py-2 text-right"><${Btn} sm=${1} on=${()=>setMo({k:'transf',plates:[v.plate],to:null})}>Transferir<//></td></tr>`)}</tbody></table></div>`:html`<p class="mt-2 text-sm text-mute">Nenhum veículo ou equipamento alocado aqui no momento.</p>`}</section>
   ${total>0?html`<div class="viz grid gap-5 lg:grid-cols-2">
    <${ChartCard} title="Custo por mês" cols=${['Mês','Combustível','Serviços','Pneus (eventos)','Total']} rows=${stack.map(d=>[mlabel(d.k),brl(d.v[0]),brl(d.v[1]),brl(d.v[2]),brl(d.v[0]+d.v[1]+d.v[2])])}><${StackCol} data=${stack} series=${SER} label="Custo por mês da obra"/><//>
    <${ChartCard} title="Custo por tipo de serviço" cols=${['Serviço','Valor']} rows=${bySvc.map(d=>[d.label,brl(d.value)])}>${bySvc.length?html`<${HBar} data=${bySvc} fmt=${brl}/>`:html`<${Empty}>Sem serviços no período.<//>`}<//></div>`
@@ -1374,7 +1378,7 @@ function App({init,sync,remote}={}){
  const goVeh=pl=>{setSel(pl);setTab('aplic')};
  const role=sync?sync.role:'administrador',ro=role==='consulta',adm=role==='administrador';const [note,setNote]=useState('');
  const warn=t=>{setNote(t);clearTimeout(window.__nt);window.__nt=setTimeout(()=>setNote(''),4000)};
- const WR=['tire','importxml','fuel','svc','vehicle','install','remove','swap','rotate','editinst','past','transf'];
+ const WR=['tire','importxml','fuel','svc','vehicle','install','remove','swap','rotate','editinst','past','transf','vedit'];
  const setMg=v=>{if(ro&&v&&WR.includes(v.k)){warn('Seu perfil é somente consulta: não é possível lançar ou alterar dados.');return}setM(v)};
  const skip=React.useRef(true);
  useEffect(()=>{if(skip.current){skip.current=false;return}if(sync){sync.save(s)}else{try{localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}}},[s]);
@@ -1390,7 +1394,7 @@ function App({init,sync,remote}={}){
  const al=alertsOf(s).length;
  useEffect(()=>{try{if(desk&&desk.app&&desk.app.dock)desk.app.dock.setBadge(al?String(al):'').catch(()=>{})}catch(e){}},[desk,al]);
  const instalar=()=>{try{desk.install.request().then(r=>{if(r==='installed')setInst('installed')},()=>{})}catch(e){}};
- const titles={fuel:m&&m.fuel?'Editar abastecimento':'Registrar abastecimento',svc:m&&m.svc?'Editar serviço':'Registrar serviço',importxml:'Importar pneus do Excel',tire:m&&m.t?'Editar pneu '+m.t.id:'Cadastrar pneu',vehicle:m&&m.kind==='equipamento'?'Novo equipamento':'Novo veículo',transf:'Transferir para centro de custo',install:'Instalar pneu',remove:'Retirar pneu',swap:'Registrar troca',rotate:'Registrar rodízio',past:'Registrar evento anterior',vinfo:'Veículo '+(m&&m.plate||''),editinst:'Corrigir instalação',thist:m&&m.t?'Histórico do pneu '+m.t.id:''};
+ const titles={fuel:m&&m.fuel?'Editar abastecimento':'Registrar abastecimento',svc:m&&m.svc?'Editar serviço':'Registrar serviço',importxml:'Importar pneus do Excel',tire:m&&m.t?'Editar pneu '+m.t.id:'Cadastrar pneu',vehicle:m&&m.kind==='equipamento'?'Novo equipamento':'Novo veículo',vedit:'Editar cadastro',transf:'Transferir para centro de custo',install:'Instalar pneu',remove:'Retirar pneu',swap:'Registrar troca',rotate:'Registrar rodízio',past:'Registrar evento anterior',vinfo:'Veículo '+(m&&m.plate||''),editinst:'Corrigir instalação',thist:m&&m.t?'Histórico do pneu '+m.t.id:''};
  const hoje=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'});
  return html`<div class="min-h-screen lg:flex font-body">${note&&html`<div class="fixed left-1/2 top-3 z-50 -translate-x-1/2 rounded-md border border-warn bg-panel px-4 py-2 text-sm shadow" role="alert">${note}</div>`}
   <aside class="shrink-0 flex flex-col bg-[#131416] text-[#E6E8EB] lg:w-60 lg:h-screen lg:sticky lg:top-0">
@@ -1425,6 +1429,7 @@ function App({init,sync,remote}={}){
    ${m.k==='fuel'&&html`<${AbastForm} s=${s} mut=${mut} close=${close} init=${m.fuel} plate=${m.plate}/>`}
    ${m.k==='svc'&&html`<${ServicoForm} s=${s} mut=${mut} close=${close} init=${m.svc} plate=${m.plate}/>`}
    ${m.k==='vehicle'&&html`<${VehicleForm} s=${s} mut=${mut} close=${close} kind=${m.kind}/>`}
+   ${m.k==='vedit'&&html`<${VehicleForm} s=${s} mut=${mut} close=${close} init=${s.vehicles.find(x=>x.plate===m.plate)}/>`}
    ${m.k==='transf'&&html`<${TransfForm} s=${s} mut=${mut} close=${close} plates=${m.plates}/>`}
    ${m.k==='install'&&(s.vehicles.length?html`<${InstallForm} s=${s} mut=${mut} close=${close} plate=${m.plate} pos=${m.pos}/>`:html`<p class="text-sm">Cadastre um veículo antes de instalar pneus.</p>`)}
    ${m.k==='remove'&&html`<${RemoveForm} s=${s} mut=${mut} close=${close} tire=${m.tire}/>`}
