@@ -759,11 +759,12 @@ function Fleet({s,setM}){
  const setP=p=>{FLEET_SEL=p;setP0(p);setOpen(true);try{window.scrollTo(0,0)}catch(e){}};
  const v=s.vehicles.find(x=>x.plate===plate)||s.vehicles.find(x=>x.plate===FLEET_SEL)||s.vehicles[0];
  const card=x=>{const eq=x.kind==='equipamento',all=posOf(x),fill=all.filter(q=>s.tires.some(t=>t.status==='uso'&&t.plate===x.plate&&t.pos===q.key)).length;
-  return html`<button type="button" key=${x.plate} onClick=${()=>setP(x.plate)} class="rounded-lg border border-line bg-panel p-4 text-left hover:border-brand focus:outline-none focus:ring-2 focus:ring-accent" aria-label=${(eq?'Equipamento ':'Veículo ')+x.plate+', abrir detalhes'}>
-   <div class="flex items-start justify-between gap-2"><div class="font-head text-2xl font-semibold leading-none">${x.plate}</div><span class="rounded-full border border-line px-2 py-0.5 text-xs text-mute">${eq?'Equipamento':'Veículo'}</span></div>
-   <div class="mt-1 text-sm">${x.model}</div>
-   <div class="mt-3 flex items-end justify-between gap-3"><div class="min-w-0 text-xs leading-5 text-mute"><div class="truncate">${eq?'Horímetro':'Km'}: <b class="text-ink">${mv(s,x.plate,x.km)}</b></div><div class="truncate">Empresa: <b class="text-ink">${x.empresa||'—'}</b></div><div class="truncate">Centro de custo: <b class="text-ink">${ccNm(s,ccNow(s,x.plate))}</b></div><div>Pneus instalados: <b class="text-ink">${fill} de ${all.length}</b></div></div>
-    <div class="shrink-0" style=${{width:'72px'}}><${VehMini} s=${s} v=${x}/></div></div></button>`};
+  const row=(l,v,b)=>html`<div class="flex items-baseline justify-between gap-3 border-t border-line py-1.5 text-sm first:border-0"><span class="shrink-0 text-mute">${l}</span><span class=${'min-w-0 break-words text-right '+(b?'font-semibold':'')}>${v}</span></div>`;
+  return html`<button type="button" key=${x.plate} onClick=${()=>setP(x.plate)} class="flex min-w-0 flex-col overflow-hidden rounded-lg border border-line bg-panel p-4 text-left hover:border-brand focus:outline-none focus:ring-2 focus:ring-accent" aria-label=${(eq?'Equipamento ':'Veículo ')+x.plate+', abrir detalhes'}>
+   <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"><div class="min-w-0 break-all font-head text-2xl font-semibold leading-none">${x.plate}</div><span class="shrink-0 rounded-full border border-line px-2 py-0.5 text-xs text-mute">${eq?'Equipamento':'Veículo'}</span></div>
+   <div class="mt-1 mb-2 break-words text-sm text-mute">${x.model}</div>
+   ${row(eq?'Horímetro':'Km',mv(s,x.plate,x.km),1)}${row('Empresa',x.empresa||'—')}${row('Centro de custo',ccNm(s,ccNow(s,x.plate)))}${row('Pneus instalados',fill+' de '+all.length)}
+   <div class="mt-3 w-20 max-w-full self-start"><${VehMini} s=${s} v=${x}/></div></button>`};
  const vs=s.vehicles.filter(x=>x.kind!=='equipamento'),es=s.vehicles.filter(x=>x.kind==='equipamento');
  if(!open||!v)return html`<div class="grid gap-5"><div class="flex flex-wrap items-center gap-2"><${Btn} p=${1} on=${()=>setM({k:'vehicle'})}>Novo veículo<//><${Btn} on=${()=>setM({k:'vehicle',kind:'equipamento'})}>Novo equipamento<//><span class="text-sm text-mute sm:ml-auto">Clique em um cadastro para ver os pneus e as informações.</span></div>
   ${!s.vehicles.length&&html`<${Empty}>Nenhum veículo ou equipamento cadastrado ainda. Use os botões acima para começar.<//>`}
