@@ -347,6 +347,7 @@ function Abastecimentos({s,mut,setM}){
   </tbody></table>${!rows.length&&html`<p class="p-4 text-sm text-mute">${all.length?'Nenhum abastecimento para este veículo.':'Nenhum abastecimento registrado ainda. Clique em Registrar abastecimento: o km (veículo) ou horímetro (equipamento) é atualizado e a média é calculada.'}</p>`}</div>${im&&html`<${Modal} title="Importar abastecimentos do Excel" close=${()=>setIm(false)} wide><${ImportFuel} s=${s} mut=${mut} close=${()=>setIm(false)}/><//>`}`}
 
 let FLEET_SEL='';
+const EMPRESAS=['RAF INFRAESTRUTURA LTDA','AMETA ENGENHARIA LTDA'];
 const empAll=s=>[...new Set((s.vehicles||[]).map(v=>v.empresa).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
 function VehicleForm({s,mut,close,kind,init}){
  const [f,u]=useF(init?{kind:init.kind||'veiculo',plate:init.plate,model:init.model,km:String(init.km),cc:'',empresa:init.empresa||''}:{kind:kind==='equipamento'?'equipamento':'veiculo',plate:'',model:'',km:'',cc:'',empresa:''});const [err,setE]=useState('');
@@ -367,7 +368,7 @@ function VehicleForm({s,mut,close,kind,init}){
   mut(n=>{n.vehicles.push({plate:p,model:f.model.trim(),km:+f.km,kind:f.kind,empresa:f.empresa.trim().toUpperCase(),axles:defAxles()});n.vehicles.sort(byPlate);if(f.cc){n.alloc=n.alloc||[];n.alloc.push({id:Math.max(0,...n.alloc.map(a=>a.id))+1,plate:p,cc:f.cc,date:'',note:'Cadastro inicial'})}});close()};
  return html`<div class="grid gap-3"><${Fld} l="Tipo de cadastro"><${Sel} v=${f.kind} on=${u('kind')} opts=${[['veiculo','Veículo (conta quilometragem, km)'],['equipamento','Equipamento (conta horímetro, horas)']]}/><//>
   <${Fld} l=${eq?'Identificação / patrimônio':'Placa'}><${Inp} v=${f.plate} on=${u('plate')} ph=${eq?'EQ-001':'ABC-1D23'}/><//><${Fld} l="Modelo"><${Inp} v=${f.model} on=${u('model')}/><//>
-  <${Fld} l="Empresa responsável (opcional)"><input class=${IN+' uppercase'} list="dl-emp" value=${f.empresa} onChange=${e=>{UP(e);u('empresa')(e)}} placeholder="Nome da empresa" autoComplete="off"/><datalist id="dl-emp">${empAll(s).map(b=>html`<option key=${b} value=${b}/>`)}</datalist><//>
+  <${Fld} l="Empresa responsável (opcional)"><${Sel} v=${f.empresa} on=${u('empresa')} opts=${[['','Não informada'],...EMPRESAS.map(x=>[x,x]),...(f.empresa&&!EMPRESAS.includes(f.empresa)?[[f.empresa,f.empresa+' (cadastro anterior)']]:[])]}/><//>
   <${Fld} l=${eq?'Horímetro atual (h)':'Km atual'}><${Inp} type="number" step=${eq?'0.1':'1'} v=${f.km} on=${u('km')}/><//>${!init&&ccAll(s).length>0&&html`<${Fld} l="Centro de custo (opcional)"><${Sel} v=${f.cc} on=${u('cc')} opts=${[['','Sem centro de custo'],...ccAll(s).map(c=>[c.id,c.name])]}/><//>`}</div>
   ${init&&html`<p class="mt-3 rounded-md border border-line bg-bg p-3 text-xs text-mute">Ao mudar a placa ou identificação, todos os pneus, abastecimentos, serviços, histórico e transferências dessa unidade acompanham o novo nome. Mudar o tipo troca a unidade de medida (km ou horas) nas telas; os números já lançados não são convertidos.</p>`}
   <p class="mt-2 text-xs text-mute">${eq?'Equipamentos usam horímetro (horas de trabalho) no lugar da quilometragem em instalações, trocas, serviços e abastecimentos.':'Veículos usam quilometragem (km).'}</p>
